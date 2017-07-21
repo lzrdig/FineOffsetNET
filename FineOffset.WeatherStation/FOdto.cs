@@ -77,7 +77,7 @@ namespace FineOffset.WeatherStation {
                                           // bit 6: dew point low
                                           // bit 7: dew point high
 
-        public byte timezone;             // Hours offset from Central European Time, so in the UK this should be set to -1.
+        public short timezone;             // Hours offset from Central European Time, so in the UK this should be set to -1.
                                           // In stations without a radio controlled clock this is always zero.
 
         public byte data_refreshed;        // Computer writes 0xAA to indicate a change of settings. Weather station clears value to acknowledge.

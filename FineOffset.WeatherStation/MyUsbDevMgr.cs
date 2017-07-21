@@ -133,10 +133,10 @@ namespace FineOffset.WeatherStation
                 _devSettings.alarm_enable1 = readBuffer[21];
                 _devSettings.alarm_enable2 = readBuffer[22];
                 _devSettings.alarm_enable3 = readBuffer[23];
-                _devSettings.timezone = readBuffer[24];
+                _devSettings.timezone = Convert.ToSByte((readBuffer[24] & 0x7f));
                 _devSettings.data_refreshed = readBuffer[26];
-                _devSettings.data_count = Convert.ToUInt16((Convert.ToByte(readBuffer[27]) & 0xff) | (Convert.ToByte(readBuffer[28]) << 8));
-                _devSettings.current_pos = Convert.ToUInt16((Convert.ToByte(readBuffer[30]) & 0xff) | (Convert.ToByte(readBuffer[31]) << 8));
+                _devSettings.data_count = Convert.ToUInt16((readBuffer[27] & 0xff) | (readBuffer[28] << 8));
+                _devSettings.current_pos = Convert.ToUInt16((readBuffer[30] & 0xff) | (readBuffer[31] << 8));
                 _devSettings.relative_pressure = Convert.ToUInt16((readBuffer[32] & 0xff) | (readBuffer[33] << 8));
                 _devSettings.absolute_pressure = Convert.ToUInt16((readBuffer[34] & 0xff) | (readBuffer[35] << 8));
                 //memcpy(&_devSettings.unknown, &readBuffer[36], 7);
@@ -365,7 +365,6 @@ namespace FineOffset.WeatherStation
                     Tuple<ErrorCode, int> res = ReadFromAddr(ref _reader, usbInterfaceInfo, history_pos, ref buf);
                 }
 
-
                 wd.delay = buf[0 + history_pos];
                 wd.in_humidity = buf[1 + history_pos];
                 wd.in_temp = Helpers.MyExtensions.FIX_SIGN((buf[2 + history_pos] & 0xff) | (buf[3 + history_pos] << 8));
@@ -435,7 +434,7 @@ namespace FineOffset.WeatherStation
         //
         // Sets a single byte at a specified offset in the fixed weather settings chunk.
         //
-        private int set_weather_setting_byte(ref UsbDevice devh, uint offset, byte data)
+        private int set_weather_setting_byte(ref UsbDevice devh, int offset, byte data)
         {
             Debug.Assert(offset < WEATHER_SETTINGS_CHUNK_SIZE);
             return write_weather_1(ref devh, Convert.ToUInt16(offset), data);
@@ -446,28 +445,28 @@ namespace FineOffset.WeatherStation
         //
         int notify_weather_setting_change(ref UsbDevice devh)
         {
-        	// Write 0xAA to address 0x1a to indicate a change of settings.
-        	return set_weather_setting_byte(ref devh, 0x1a, 0xaa);
+            // Write 0xAA to address 0x1a to indicate a change of settings.
+            return set_weather_setting_byte(ref devh, 0x1a, 0xaa);
         }
 
         //
         // Sets a weather setting at a given offset in the weather settings chunk.
         //
-        //int set_weather_setting(struct usb_dev_handle * h, unsigned int offset, char* data, unsigned int len)
-        //{
-        //	unsigned int i;
-        //	for (i = 0; i<len; i++)
-        //	{
-        //		if (set_weather_setting_byte(h, offset, data[i]) != 0)
-        //		{
-        //			return -1;
-        //		}
-        //	}
+        int set_weather_setting(ref UsbDevice devh, int offset, byte[] data, int len)
+        {
+            int status = 0; //success
+            for (int i = 0; i < len; i++)
+            {
+                if (set_weather_setting_byte(ref devh, offset, data[i]) != 0)
+                {
+                    return -1;
+                }
+            }
 
+            status = notify_weather_setting_change(ref devh);
 
-        //    notify_weather_setting_change(h);
-        //	return 0;
-        //}
+            return status;
+        }
 
         //// TODO: Remake this to weather_settings_t structure and write all changes in that to the device.
         //int set_weather_settings_bulk(struct usb_dev_handle * h, unsigned int change_offset, char* data, unsigned int len)
@@ -503,41 +502,47 @@ namespace FineOffset.WeatherStation
         //	return 0;
         //}
 
-        //int set_timezone(struct usb_dev_handle * h, signed char timezone)
-        //{
-        //	return set_weather_setting(h, 24, (char*)&timezone, 1);
-        //}
+        int set_timezone(ref UsbDevice devh, sbyte timezone)
+        {
+            byte[] tmz = new byte[1];
+            tmz[0] = Convert.ToByte(timezone);
 
-        //int set_delay(struct usb_dev_handle * h, unsigned char delay)
-        //{
-        //	return set_weather_setting(h, 16, (char*)&delay, 1);
-        //}
+            return set_weather_setting(ref devh, 24, tmz, 1);
+        }
+
+        int set_delay(ref UsbDevice devh, sbyte delay)
+        {
+            byte[] del = new byte[1];
+            del[0] = Convert.ToByte(delay);
+
+            return set_weather_setting(ref devh, 16, del, 1);
+        }
         #endregion
 
         #region Helpers for Write
         //
         //Reads weather ack message when writing setting data.    
         //
-        int read_weather_ack(ref UsbDevice devh)
+        int read_weather_ack(ref UsbDevice devh, int addr)
+        {
+            int i;
+            byte[] buf = new byte[8];
+
+            read_weather_msg(ref devh, buf, addr);
+
+            // The ack should consist of just 0xa5.
+            for (i = 0; i < 8; i++)
             {
-                int i;
-                byte[] buf = new byte[8];
+                //debug_printf(2, "%x ", (buf[i] & 0xff));
 
-                read_weather_msg(ref devh, buf);
-
-                // The ack should consist of just 0xa5.
-                for (i = 0; i < 8; i++)
-                {
-                    //debug_printf(2, "%x ", (buf[i] & 0xff));
-
-                    if ((buf[i] & 0xff) != 0xa5)
-                        return -1;
-                }
-
-                //    debug_printf(2, "\n");
-
-                return 0;
+                if ((buf[i] & 0xff) != 0xa5)
+                    return -1;
             }
+
+            //    debug_printf(2, "\n");
+
+            return 0;
+        }
 
         //
         // Writes 1 byte of data to the weather station.
@@ -548,7 +553,7 @@ namespace FineOffset.WeatherStation
 
             send_usb_msgbuf(ref h, msg, 8);
 
-            return read_weather_ack(ref h);
+            return read_weather_ack(ref h, addr);
         }
 
         //
@@ -595,20 +600,18 @@ namespace FineOffset.WeatherStation
 
             send_usb_msgbuf(ref h, data, 32);   // Send data.
 
-            return read_weather_ack(ref h);
+            return read_weather_ack(ref h, addr);
         }
         #endregion
 
         //
         // All data from the weather station is read in 32 byte chunks.
         //
-        int read_weather_msg(ref UsbDevice devh, byte[] readBuffer)
+        int read_weather_msg(ref UsbDevice devh, byte[] readBuffer, int address)
         {
             int numBytes = 0;
-            //return usb_interrupt_read(h, ENDPOINT_INTERRUPT_ADDRESS, buf, 32, USB_TIMEOUT);
 
-            //                              endpoint, buffer , size, timeout
-            //ret = usb_interrupt_read(devh, 0x81,      buf,   0x20, 1000);
+            //ret = usb_interrupt_read(devh, ENDPOINT_INTERRUPT_ADDRESS, buf,   0x20, USB_TIMEOUT);
             ErrorCode ec = _reader.Read(readBuffer, address, 0x20, 500, out numBytes);
 
             if (ec == ErrorCode.Win32Error)
