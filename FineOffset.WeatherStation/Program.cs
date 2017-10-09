@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Diagnostics;
 using LibUsbDotNet;
 using LibUsbDotNet.Main;
-using LibUsbDotNet.Info;
-using System.Runtime.InteropServices;
-using System.Diagnostics;
+using FineOffsetLib.WSdataStructs;
+using FineOffsetLib.HIDmgr;
 
-namespace FineOffset.WeatherStation {
+namespace FineOffset.WeatherStation
+{
     class Program {
         public static UsbDevice MyUsbDevice;
 
@@ -37,9 +38,7 @@ namespace FineOffset.WeatherStation {
 
                 MyUsbDevMgr myDevMGr = new MyUsbDevMgr(wholeUsbDevice, ws);
 
-                bool bValidDev = ReferenceEquals(wholeUsbDevice, null);
-
-                if (!bValidDev)
+                if (!ReferenceEquals(wholeUsbDevice, null))
                 {
                     ec = myDevMGr.InitDevInterface();
 

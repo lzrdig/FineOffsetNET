@@ -1,16 +1,17 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Diagnostics;
+
 using LibUsbDotNet;
 using LibUsbDotNet.Main;
 using LibUsbDotNet.Info;
-using System.Diagnostics;
 
-namespace FineOffset.WeatherStation
+using FineOffsetLib.WSdataStructs;
+using FineOffsetLib.Helpers;
+
+
+namespace FineOffsetLib.HIDmgr
 {
-    class MyUsbDevMgr
+    public class MyUsbDevMgr
     {
         public const uint HISTORY_MAX = 4080;
         public const uint HISTORY_CHUNK_SIZE = 16;
@@ -46,16 +47,14 @@ namespace FineOffset.WeatherStation
 
         }
 
-        public FOsettings WSettings {
-            get { return (GetSettings()); }
-            set { _devSettings = value; }
-        }
-
         public bool IsInit {
             get { return _devInit; }
             set { _devInit = value; }
         }
-
+        public FOsettings WSettings {
+            get { return (GetSettings()); }
+            set { _devSettings = value; }
+        }
         public FOweatheritem[] History {
             get { return _history; }
             set {
@@ -65,6 +64,7 @@ namespace FineOffset.WeatherStation
                 _history = value;
             }
         }
+
 
         public UsbEndpointReader MyDevReader {
             get { return _reader; }
@@ -111,6 +111,8 @@ namespace FineOffset.WeatherStation
             }
             return ec;
         }
+
+        #region GetFunctions
 
         public FOsettings GetSettings()
         {
@@ -240,7 +242,6 @@ namespace FineOffset.WeatherStation
 
             return _devSettings;
         }
-
         private void GetSettingsBlockRaw(ref byte[] readBuffer)
         {
             bool bValidDev = ReferenceEquals(_usbDev, null);
@@ -386,49 +387,7 @@ namespace FineOffset.WeatherStation
             return wd;
         }
 
-
-        private Tuple<ErrorCode, int> ReadFromAddr(ref UsbEndpointReader reader, UsbInterfaceInfo usbInterfaceInfo, ushort address, ref byte[] readBuffer)
-        {
-            ErrorCode ec = ErrorCode.None;
-            bool ret = false;
-            int numBytes = 0;
-            string numBytesRecord = "";
-            int lengthTransferred = 0;
-            UsbSetupPacket usbPacket = new UsbSetupPacket();
-
-            try
-            {
-                byte lowbyte = (byte)(address & 0xFF);
-                byte highbyte = (byte)(address >> 8);
-
-                //                                   request type                       request                             value    index           data attached to request      size,    timeout
-                //int ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE,                                       9   ,   0x200,                0  ,         tbuf,                   8      , 1000);
-                usbPacket = new UsbSetupPacket((byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface, 9, (short)0x200, usbInterfaceInfo.Descriptor.InterfaceID, 8);
-
-                byte[] cmd = new byte[] { 0xA1, highbyte, lowbyte, 0x20, 0xA1, 0x00, 0x00, 0x20 };
-
-                ret = _usbDev.ControlTransfer(ref usbPacket, cmd, cmd.Length, out lengthTransferred);
-
-                if (ret)
-                {
-                    //                              endpoint, buffer , size, timeout
-                    //ret = usb_interrupt_read(devh, 0x81,      buf,   0x20, 1000);
-                    ec = reader.Read(readBuffer, address, 0x20, 500, out numBytes);
-
-                    if (ec == ErrorCode.Win32Error)
-                        ec = reader.Read(readBuffer, address, 0x20, 500, out numBytes);
-
-                    numBytesRecord += Convert.ToString(numBytes) + ";";
-                }
-            }
-            catch (ArgumentOutOfRangeException bufEx)
-            {
-                Console.WriteLine();
-                Console.WriteLine((ec != ErrorCode.None ? ec + ":" : String.Empty) + bufEx.Message);
-            }
-
-            return new Tuple<ErrorCode, int>(ec, numBytes);
-        }
+        #endregion
 
         #region Set Functions
         //
@@ -557,6 +516,42 @@ namespace FineOffset.WeatherStation
         }
 
         //
+        // Writes 32 bytes of data to the weather station.
+        //
+        int write_weather_32(ref UsbDevice h, ushort addr, byte[] data)
+        {
+
+            byte[] msg = new byte[] { 0xa0, Convert.ToByte(addr >> 8), Convert.ToByte(addr & 0xff), 0x20, 0xa0, 0, 0, 0x20 };
+
+
+            send_usb_msgbuf(ref h, msg, 8);     // Send write command.
+
+            send_usb_msgbuf(ref h, data, 32);   // Send data.
+
+            return read_weather_ack(ref h, addr);
+        }
+
+        #endregion
+
+        //
+        // All data from the weather station is read in 32 byte chunks.
+        //
+        int read_weather_msg(ref UsbDevice devh, byte[] readBuffer, int address)
+        {
+            int numBytes = 0;
+
+            //ret = usb_interrupt_read(devh, ENDPOINT_INTERRUPT_ADDRESS, buf,   0x20, USB_TIMEOUT);
+            ErrorCode ec = _reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+
+            if (ec == ErrorCode.Win32Error)
+                ec = _reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+
+            return numBytes;
+        }
+
+
+
+        //
         // Sends a USB message to the device from a given buffer.
         //
         int send_usb_msgbuf(ref UsbDevice h, byte[] msg, int msgsize)
@@ -587,38 +582,58 @@ namespace FineOffset.WeatherStation
             return bytes_written;
         }
 
-        //
-        // Writes 32 bytes of data to the weather station.
-        //
-        int write_weather_32(ref UsbDevice h, ushort addr, byte[] data)
+
+        /// <summary>
+        /// High-Level USB read function. Returns data from the address of device buffer into the client <paramref name="readBuffer"/>.
+        /// </summary>
+        /// <param name="reader"></param>
+        /// <param name="usbInterfaceInfo"></param>
+        /// <param name="address"></param>
+        /// <param name="readBuffer"></param>
+        /// <returns></returns>
+        private Tuple<ErrorCode, int> ReadFromAddr(ref UsbEndpointReader reader, UsbInterfaceInfo usbInterfaceInfo, ushort address, ref byte[] readBuffer)
         {
-
-            byte[] msg = new byte[] { 0xa0, Convert.ToByte(addr >> 8), Convert.ToByte(addr & 0xff), 0x20, 0xa0, 0, 0, 0x20 };
-
-
-            send_usb_msgbuf(ref h, msg, 8);     // Send write command.
-
-            send_usb_msgbuf(ref h, data, 32);   // Send data.
-
-            return read_weather_ack(ref h, addr);
-        }
-        #endregion
-
-        //
-        // All data from the weather station is read in 32 byte chunks.
-        //
-        int read_weather_msg(ref UsbDevice devh, byte[] readBuffer, int address)
-        {
+            ErrorCode ec = ErrorCode.None;
+            bool ret = false;
             int numBytes = 0;
+            string numBytesRecord = "";
+            int lengthTransferred = 0;
+            UsbSetupPacket usbPacket = new UsbSetupPacket();
 
-            //ret = usb_interrupt_read(devh, ENDPOINT_INTERRUPT_ADDRESS, buf,   0x20, USB_TIMEOUT);
-            ErrorCode ec = _reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+            try
+            {
+                byte lowbyte = (byte)(address & 0xFF);
+                byte highbyte = (byte)(address >> 8);
 
-            if (ec == ErrorCode.Win32Error)
-                ec = _reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+                //                                   request type                       request                             value    index           data attached to request      size,    timeout
+                //int ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE,                                       9   ,   0x200,                0  ,         tbuf,                   8      , 1000);
+                usbPacket = new UsbSetupPacket((byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface, 9, (short)0x200, usbInterfaceInfo.Descriptor.InterfaceID, 8);
 
-            return numBytes;
+                byte[] cmd = new byte[] { 0xA1, highbyte, lowbyte, 0x20, 0xA1, 0x00, 0x00, 0x20 };
+
+                ret = _usbDev.ControlTransfer(ref usbPacket, cmd, cmd.Length, out lengthTransferred);
+
+                if (ret)
+                {
+                    //                              endpoint, buffer , size, timeout
+                    //ret = usb_interrupt_read(devh, 0x81,      buf,   0x20, 1000);
+                    ec = reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+
+                    if (ec == ErrorCode.Win32Error)
+                        ec = reader.Read(readBuffer, address, 0x20, 500, out numBytes);
+
+                    numBytesRecord += Convert.ToString(numBytes) + ";";
+                }
+            }
+            catch (ArgumentOutOfRangeException bufEx)
+            {
+                Console.WriteLine();
+                Console.WriteLine((ec != ErrorCode.None ? ec + ":" : String.Empty) + bufEx.Message);
+            }
+
+            return new Tuple<ErrorCode, int>(ec, numBytes);
         }
+
 
         //
         // Parses a date in BCD format (http://en.wikipedia.org/wiki/Binary-coded_decimal).
@@ -660,6 +675,11 @@ namespace FineOffset.WeatherStation
 
             return rawtime;
         }
+
+
+
+
+
 
         public void print_summary(FOsettings ws, FOweatheritem item)
         {

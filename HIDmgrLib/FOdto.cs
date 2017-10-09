@@ -4,8 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace FineOffset.WeatherStation {
-    class FOsettings {
+namespace FineOffsetLib.WSdataStructs {
+    public class FOsettings {
         // The weather station stores signed shorts in a non-standard way.
         // Instead of two's compliment, sign-magnitude is used (8-bit is sign).
         // http://en.wikipedia.org/wiki/Signed_number_representations
@@ -34,23 +34,23 @@ namespace FineOffset.WeatherStation {
                                           // bit 3: wind speed: 1 = m/h
                                           // bit 4: wind speed: 1 = bft
 
-        public byte display_options1; // bit 0: pressure: 0 = absolute, 1 = relative
-                                      // bit 1: wind speed: 0 = average, 1 = gust
-                                      // bit 2: time: 0 = 24 hour, 1 = 12 hour
-                                      // bit 3: date: 0 = day-month-year, 1 = month-day-year
-                                      // bit 4: time scale(?): 0 = 12 hour, 1 = 24 hour
-                                      // bit 5: date: 1 = show year year
-                                      // bit 6: date: 1 = show day name
-                                      // bit 7: date: 1 = alarm time
+        public byte display_options1;     // bit 0: pressure: 0 = absolute, 1 = relative
+                                          // bit 1: wind speed: 0 = average, 1 = gust
+                                          // bit 2: time: 0 = 24 hour, 1 = 12 hour
+                                          // bit 3: date: 0 = day-month-year, 1 = month-day-year
+                                          // bit 4: time scale(?): 0 = 12 hour, 1 = 24 hour
+                                          // bit 5: date: 1 = show year year
+                                          // bit 6: date: 1 = show day name
+                                          // bit 7: date: 1 = alarm time
 
-        public byte display_options2; // bit 0: outdoor temperature: 1 = temperature
-                                      // bit 1: outdoor temperature: 1 = wind chill
-                                      // bit 2: outdoor temperature: 1 = dew point
-                                      // bit 3: rain: 1 = hour
-                                      // bit 4: rain: 1 = day
-                                      // bit 5: rain: 1 = week
-                                      // bit 6: rain: 1 = month
-                                      // bit 7: rain: 1 = total
+        public byte display_options2;     // bit 0: outdoor temperature: 1 = temperature
+                                          // bit 1: outdoor temperature: 1 = wind chill
+                                          // bit 2: outdoor temperature: 1 = dew point
+                                          // bit 3: rain: 1 = hour
+                                          // bit 4: rain: 1 = day
+                                          // bit 5: rain: 1 = week
+                                          // bit 6: rain: 1 = month
+                                          // bit 7: rain: 1 = total
 
         public byte alarm_enable1;        // bit 1: time
                                           // bit 2: wind direction
@@ -77,7 +77,7 @@ namespace FineOffset.WeatherStation {
                                           // bit 6: dew point low
                                           // bit 7: dew point high
 
-        public short timezone;             // Hours offset from Central European Time, so in the UK this should be set to -1.
+        public short timezone;            // Hours offset from Central European Time, so in the UK this should be set to -1.
                                           // In stations without a radio controlled clock this is always zero.
 
         public byte data_refreshed;        // Computer writes 0xAA to indicate a change of settings. Weather station clears value to acknowledge.
@@ -188,7 +188,7 @@ namespace FineOffset.WeatherStation {
         public byte[] raw_data = new byte[16];
     }
 
-    class FOweatheritem {
+    public class FOweatheritem {
         private FOweatherdata _weatherdata;
 
         public int history_index;
