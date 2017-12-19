@@ -57,7 +57,7 @@ namespace FineOffset.WeatherStation
 
                         //myDevMGr.print_history_item(myDevMGr.History[HISTORY_MAX - 1]);
 
-                        myDevMGr.print_status(ws);
+                       // myDevMGr.print_status(ws);
 
                         myDevMGr.print_settings(ws);
                     }

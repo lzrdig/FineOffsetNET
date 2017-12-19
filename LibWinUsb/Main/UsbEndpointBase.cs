@@ -200,6 +200,73 @@ namespace LibUsbDotNet.Main
         }
 
         /// <summary>
+        /// LookupEndpointInfo
+        /// </summary>
+        /// <param name="currentConfigInfo"></param>
+        /// <param name="endpointAddress"></param>
+        /// <param name="usbInterfaceInfo"></param>
+        /// <param name="usbEndpointInfo"></param>
+        /// <returns></returns>
+        public static bool LookupEndpointInfo(UsbConfigInfo currentConfigInfo, byte endpointAddress, out UsbInterfaceInfo usbInterfaceInfo, out UsbEndpointInfo usbEndpointInfo)
+        {
+            bool found = false;
+
+            usbInterfaceInfo = null;
+            usbEndpointInfo = null;
+            foreach (UsbInterfaceInfo interfaceInfo in currentConfigInfo.InterfaceInfoList)
+            {
+                foreach (UsbEndpointInfo endpointInfo in interfaceInfo.EndpointInfoList)
+                {
+                    if ((endpointAddress & UsbConstants.ENDPOINT_NUMBER_MASK) == 0)
+                    {
+                        // find first read/write endpoint
+                        if ((endpointAddress & UsbConstants.ENDPOINT_DIR_MASK) == 0 &&
+                            (endpointInfo.Descriptor.EndpointID & UsbConstants.ENDPOINT_DIR_MASK) == 0)
+                        {
+                            // first write endpoint
+                            found = true;
+                        }
+                        if ((endpointAddress & UsbConstants.ENDPOINT_DIR_MASK) != 0 &&
+                            (endpointInfo.Descriptor.EndpointID & UsbConstants.ENDPOINT_DIR_MASK) != 0)
+                        {
+                            // first read endpoint
+                            found = true;
+                        }
+                    }
+                    else if (endpointInfo.Descriptor.EndpointID == endpointAddress)
+                    {
+                        found = true;
+                    }
+
+                    if (found)
+                    {
+                        usbInterfaceInfo = interfaceInfo;
+                        usbEndpointInfo = endpointInfo;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Synchronous bulk/interrupt transfer function.
+        /// </summary>
+        /// <param name="buffer">A caller-allocated buffer for the transfer data. This object is pinned using <see cref="PinnedHandle"/>.</param>
+        /// <param name="offset">Position in buffer that transferring begins.</param>
+        /// <param name="length">Number of bytes, starting from thr offset parameter to transfer.</param>
+        /// <param name="timeout">Maximum time to wait for the transfer to complete.</param>
+        /// <param name="transferLength">Number of bytes actually transferred.</param>
+        /// <returns>True on success.</returns>
+        public ErrorCode Transfer(object buffer, int offset, int length, int timeout, out int transferLength)
+        {
+            PinnedHandle pinned = new PinnedHandle(buffer);
+            ErrorCode eReturn = Transfer(pinned.Handle, offset, length, timeout, out transferLength);
+            pinned.Dispose();
+            return eReturn;
+        }
+
+        /// <summary>
         /// Synchronous bulk/interrupt transfer function.
         /// </summary>
         /// <param name="buffer">An <see cref="IntPtr"/> to a caller-allocated buffer.</param>
@@ -208,7 +275,9 @@ namespace LibUsbDotNet.Main
         /// <param name="timeout">Maximum time to wait for the transfer to complete.</param>
         /// <param name="transferLength">Number of bytes actually transferred.</param>
         /// <returns>True on success.</returns>
-        public virtual ErrorCode Transfer(IntPtr buffer, int offset, int length, int timeout, out int transferLength) { return UsbTransfer.SyncTransfer(TransferContext, buffer, offset, length, timeout, out transferLength); }
+        public virtual ErrorCode Transfer(IntPtr buffer, int offset, int length, int timeout, out int transferLength) {
+            return UsbTransfer.SyncTransfer(TransferContext, buffer, offset, length, timeout, out transferLength);
+        }
 
         /// <summary>
         /// Creates, fills and submits an asynchronous <see cref="UsbTransfer"/> context.
@@ -293,64 +362,6 @@ namespace LibUsbDotNet.Main
         /// <param name="usbInterfaceInfo">On success, the <see cref="UsbInterfaceInfo"/> class for this endpoint.</param>
         /// <param name="usbEndpointInfo">On success, the <see cref="UsbEndpointInfo"/> class for this endpoint.</param>
         /// <returns>True of the endpoint was found, otherwise false.</returns>
-        public static bool LookupEndpointInfo(UsbConfigInfo currentConfigInfo, byte endpointAddress, out UsbInterfaceInfo usbInterfaceInfo, out UsbEndpointInfo usbEndpointInfo)
-        {
-            bool found = false;
-
-            usbInterfaceInfo = null;
-            usbEndpointInfo = null;
-            foreach (UsbInterfaceInfo interfaceInfo in currentConfigInfo.InterfaceInfoList)
-            {
-                foreach (UsbEndpointInfo endpointInfo in interfaceInfo.EndpointInfoList)
-                {
-                    if ((endpointAddress & UsbConstants.ENDPOINT_NUMBER_MASK) == 0)
-                    {
-                        // find first read/write endpoint
-                        if ((endpointAddress & UsbConstants.ENDPOINT_DIR_MASK) == 0 && 
-                            (endpointInfo.Descriptor.EndpointID & UsbConstants.ENDPOINT_DIR_MASK) == 0)
-                        {
-                            // first write endpoint
-                            found = true;
-                        }
-                        if ((endpointAddress & UsbConstants.ENDPOINT_DIR_MASK) != 0 && 
-                            (endpointInfo.Descriptor.EndpointID & UsbConstants.ENDPOINT_DIR_MASK) != 0)
-                        {
-                            // first read endpoint
-                            found = true;
-                        }
-                    }
-                    else if (endpointInfo.Descriptor.EndpointID == endpointAddress)
-                    {
-                        found = true;
-                    }
-
-                    if (found)
-                    {
-                        usbInterfaceInfo = interfaceInfo;
-                        usbEndpointInfo = endpointInfo;
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Synchronous bulk/interrupt transfer function.
-        /// </summary>
-        /// <param name="buffer">A caller-allocated buffer for the transfer data. This object is pinned using <see cref="PinnedHandle"/>.</param>
-        /// <param name="offset">Position in buffer that transferring begins.</param>
-        /// <param name="length">Number of bytes, starting from thr offset parameter to transfer.</param>
-        /// <param name="timeout">Maximum time to wait for the transfer to complete.</param>
-        /// <param name="transferLength">Number of bytes actually transferred.</param>
-        /// <returns>True on success.</returns>
-        public ErrorCode Transfer(object buffer, int offset, int length, int timeout, out int transferLength)
-        {
-            PinnedHandle pinned = new PinnedHandle(buffer);
-            ErrorCode eReturn = Transfer(pinned.Handle, offset, length, timeout, out transferLength);
-            pinned.Dispose();
-            return eReturn;
-        }
 
         private void DisposeAndRemoveFromList()
         {

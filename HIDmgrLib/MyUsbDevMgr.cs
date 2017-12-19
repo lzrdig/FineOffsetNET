@@ -853,9 +853,6 @@ namespace FineOffsetLib.HIDmgr
             Console.WriteLine("\n");
         }
 
-        //
-        // Prints a BCD date.
-        //
         void print_bcd_date(byte[] date)
         {
             bcd_date_t d = parse_bcd_date(date);
