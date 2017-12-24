@@ -7,7 +7,7 @@ using LibUsbDotNet.Info;
 
 using FineOffsetLib.WSdataStructs;
 using FineOffsetLib.Helpers;
-
+using System.Collections.ObjectModel;
 
 namespace FineOffsetLib.HIDmgr
 {
@@ -24,10 +24,10 @@ namespace FineOffsetLib.HIDmgr
         private UsbDevice _usbDev;
         private FOsettings _devSettings;
         private FOweatheritem[] _history = new FOweatheritem[HISTORY_MAX];
-        private bool _devInit;
 
-        //private UsbInterfaceInfo _usbInterfaceInfo = null;
-        //private UsbEndpointInfo _usbEndpointInfo = null;
+
+        private UsbInterfaceInfo _usbInterfaceInfo = null;
+        private UsbEndpointInfo _usbEndpointInfo = null;
         private UsbEndpointReader _reader = null;
 
         public MyUsbDevMgr(IUsbDevice usbDev)
@@ -47,10 +47,9 @@ namespace FineOffsetLib.HIDmgr
 
         }
 
-        public bool IsInit {
-            get { return _devInit; }
-            set { _devInit = value; }
-        }
+        #region Properties
+
+        public bool IsInit {  get;  set; }
         public FOsettings WSettings {
             get { return (GetSettings()); }
             set { _devSettings = value; }
@@ -64,12 +63,13 @@ namespace FineOffsetLib.HIDmgr
                 _history = value;
             }
         }
-
-
         public UsbEndpointReader MyDevReader {
             get { return _reader; }
             set { _reader = value; }
         }
+
+        #endregion
+
 
         public void CloseDevHndl()
         {
@@ -81,7 +81,7 @@ namespace FineOffsetLib.HIDmgr
             ErrorCode ec = ErrorCode.None;
             bool result = false;
 
-            _devInit = false;
+            IsInit = false;
 
             IUsbDevice wholeUsbDevice = _usbDev as IUsbDevice;
             try
@@ -107,16 +107,44 @@ namespace FineOffsetLib.HIDmgr
             }
             else
             {
-                _devInit = true;
+                IsInit = true;
             }
             return ec;
         }
 
+        public ErrorCode GetDevInfo()
+        {
+            ErrorCode ec = ErrorCode.None;
+
+            try {
+                UsbConfigInfo configInfo = _usbDev.Configs[0];
+
+                _usbInterfaceInfo = configInfo.InterfaceInfoList[0];
+
+                ReadOnlyCollection<UsbEndpointInfo> endpointList = _usbInterfaceInfo.EndpointInfoList;
+
+                for (int iEndpoint = 0; iEndpoint < endpointList.Count; iEndpoint++)
+                {
+                    //Console.WriteLine(endpointList[iEndpoint].ToString());
+                    _usbEndpointInfo = endpointList[iEndpoint];
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine();
+                Console.WriteLine((ec != ErrorCode.None ? ec + ":" : String.Empty) + ex.Message);
+            }
+
+            return ec;
+
+        }
+
+
         #region GetFunctions
 
-        public FOsettings GetSettings()
+        private FOsettings GetSettings()
         {
-            bool bValidDev = ReferenceEquals(_usbDev, null);
+            bool bValidDev = _usbDev is null;
 
             if (!bValidDev)
             {
@@ -238,10 +266,22 @@ namespace FineOffsetLib.HIDmgr
                 Array.Copy(readBuffer, 246, _devSettings.max_rain_monthly_date, 0, _devSettings.max_rain_monthly_date.Length);
                 //memcpy(&_devSettings.max_rain_total_date, &readBuffer[251], sizeof(_devSettings.max_rain_total_date));
                 Array.Copy(readBuffer, 251, _devSettings.max_rain_total_date, 0, _devSettings.max_rain_total_date.Length);
+
+                if (Convert.ToBoolean(_devSettings.unit_settings1 & (1 << 5)))
+                    _devSettings.pressure_unit = "hPa";
+                else if (Convert.ToBoolean(_devSettings.unit_settings1 & (1 << 6)))
+                    _devSettings.pressure_unit = "inHg";
+                else if (Convert.ToBoolean(_devSettings.unit_settings1 & (1 << 7)))
+                    _devSettings.pressure_unit = "mmHg";
+
+                _devSettings.indoor_temperature_unit=
+                    (Convert.ToBoolean(_devSettings.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius";
+
             }
 
             return _devSettings;
         }
+
         private void GetSettingsBlockRaw(ref byte[] readBuffer)
         {
             bool bValidDev = ReferenceEquals(_usbDev, null);
@@ -286,65 +326,76 @@ namespace FineOffsetLib.HIDmgr
             // weather station date/time + the delay in minutes between each event, so
             // we can only get the timestamps by doing it this way.
 
-            // Convert the weather station date from a BCD date to unix date.
-            long station_date = bcd_to_unix_date(parse_bcd_date(_devSettings.datetime));
+            
 
             uint total_seconds = 0;
-            uint seconds = 0;
-            uint history_begin = (_devSettings.current_pos + HISTORY_CHUNK_SIZE);
+            uint seconds = 0;            
             int history_index;
             int j;
             int i = 0;
             uint history_address;
 
-            //Debug.WriteLine("Start reading history blocks\n");
-            //Debug.WriteLine("Index\tTimestamp\t\tDelay\n");
-
-            for (history_address = _devSettings.current_pos, i = (Convert.ToInt32(HISTORY_MAX) - 1), j = 0;
-                (j < items_to_read);
-                history_address -= HISTORY_CHUNK_SIZE, i--, j++)
+            if (ReferenceEquals(_devSettings, null)) {
+                Debug.WriteLine("No device settings have been read. Check connection or debug the read of settings!\n");
+            }
+            else
             {
-                // The buffer is full so it acts as a circular buffer, so we need to
-                // wrap to the end to get the next item.
-                if (history_address < HISTORY_START)
+                // Convert the weather station date from a BCD date to unix date.
+                long station_date = bcd_to_unix_date(parse_bcd_date(_devSettings.datetime));
+                // Set the start of the history data relative to previously read position. Mind that it is offset by device settings block.
+                // May need to add the check so that it does start reading beyond the data block that contains the device settings.
+                // Device settings block size is usually 1024 bytes.
+                uint history_begin = (_devSettings.current_pos + HISTORY_CHUNK_SIZE);
+
+                Debug.WriteLine("Start reading history blocks:\n");
+                Debug.WriteLine("Index\tTimestamp\t\tDelay\n");
+
+                for (history_address = _devSettings.current_pos, i = (Convert.ToInt32(HISTORY_MAX) - 1), j = 0;
+                    (j < items_to_read);
+                    history_address -= HISTORY_CHUNK_SIZE, i--, j++)
                 {
-                    history_address = HISTORY_END - (HISTORY_START - history_address);
+                    // The buffer is full so it acts as a circular buffer, so we need to
+                    // wrap to the end to get the next item.
+                    if (history_address < HISTORY_START)
+                    {
+                        history_address = HISTORY_END - (HISTORY_START - history_address);
+                    }
+
+                    // Calculate the index we're at in the history, from 0-4080.
+                    if (_devSettings.data_count < HISTORY_MAX)
+                    {
+                        history_index = 1 + Convert.ToUInt16((history_address - HISTORY_START) / HISTORY_CHUNK_SIZE); // Normal.
+                    }
+                    else
+                    {
+                        history_index = 1 + Convert.ToUInt16(((history_address - HISTORY_START) + (HISTORY_END - history_begin)) / HISTORY_CHUNK_SIZE); // Circular buffer.
+                    }
+
+                    // Read history chunk.
+                    _history[i].history_index = history_index;
+                    _history[i].address = history_address;
+
+                    //history[i].data = get_history_chunk(h, ref _devSettings, history_address);
+                    _history[i].WeatherData = Get_history_chunk(_devSettings, Convert.ToUInt16(history_address));
+
+                    // Calculate timestamp.
+                    _history[i].timestamp = (long)(station_date - total_seconds);
+                    //seconds = history[i].data.delay * 60;
+                    seconds = Convert.ToUInt32(Convert.ToInt32(Convert.ToByte(_history[i].WeatherData.delay)) * 60);
+                    total_seconds += seconds;
+
+                    // Debug print.	
+                    Debug.WriteLine("DEBUG: Seconds before current event = {0}", total_seconds);
+                    Debug.WriteLine("DEBUG: Temp = {0} C", _history[i].WeatherData.in_temp * 0.1f);
+                    Debug.WriteLine("DEBUG: {0},\t{1},\t{2:d} minutes",
+                        i,
+                        _history[i].timestamp, //get_timestamp(history[i].timestamp),
+                        Convert.ToInt32(_history[i].WeatherData.delay));
                 }
-
-                // Calculate the index we're at in the history, from 0-4080.
-                if (_devSettings.data_count < HISTORY_MAX)
-                {
-                    history_index = 1 + Convert.ToUInt16((history_address - HISTORY_START) / HISTORY_CHUNK_SIZE); // Normal.
-                }
-                else
-                {
-                    history_index = 1 + Convert.ToUInt16(((history_address - HISTORY_START) + (HISTORY_END - history_begin)) / HISTORY_CHUNK_SIZE); // Circular buffer.
-                }
-
-                // Read history chunk.
-                _history[i].history_index = history_index;
-                _history[i].address = history_address;
-
-                //history[i].data = get_history_chunk(h, ref _devSettings, history_address);
-                _history[i].WeatherData = get_history_chunk(_devSettings, Convert.ToUInt16(history_address));
-
-                // Calculate timestamp.
-                _history[i].timestamp = (long)(station_date - total_seconds);
-                //seconds = history[i].data.delay * 60;
-                seconds = Convert.ToUInt32(Convert.ToInt32(Convert.ToByte(_history[i].WeatherData.delay)) * 60);
-                total_seconds += seconds;
-
-                // Debug print.	
-                Debug.WriteLine("DEBUG: Seconds before current event = {0}", total_seconds);
-                Debug.WriteLine("DEBUG: Temp = {0} C", _history[i].WeatherData.in_temp * 0.1f);
-                Debug.WriteLine("DEBUG: {0},\t{1},\t{2:d} minutes",
-                    i,
-                    _history[i].timestamp, //get_timestamp(history[i].timestamp),
-                    Convert.ToInt32(_history[i].WeatherData.delay));
             }
         }
 
-        private FOweatherdata get_history_chunk(FOsettings ws, ushort history_pos)
+        private FOweatherdata Get_history_chunk(FOsettings ws, ushort history_pos)
         {
             byte[] buf = new byte[history_pos + 2 * HISTORY_CHUNK_SIZE]; //libsub reads data into the history_pos location of the buffer
             FOweatherdata wd = new FOweatherdata();
@@ -389,14 +440,17 @@ namespace FineOffsetLib.HIDmgr
 
         #endregion
 
+
+
         #region Set Functions
+
         //
         // Sets a single byte at a specified offset in the fixed weather settings chunk.
         //
         private int set_weather_setting_byte(ref UsbDevice devh, int offset, byte data)
         {
             Debug.Assert(offset < WEATHER_SETTINGS_CHUNK_SIZE);
-            return write_weather_1(ref devh, Convert.ToUInt16(offset), data);
+            return Write_weather_1(ref devh, Convert.ToUInt16(offset), data);
         }
 
         //
@@ -427,39 +481,43 @@ namespace FineOffsetLib.HIDmgr
             return status;
         }
 
-        //// TODO: Remake this to weather_settings_t structure and write all changes in that to the device.
+        // TODO: Remake this to weather_settings_t structure and write all changes in that to the device.
         //int set_weather_settings_bulk(struct usb_dev_handle * h, unsigned int change_offset, char* data, unsigned int len)
-        //{
-        //	unsigned offset;
-        ////unsigned int i;
-        //char buf[WEATHER_SETTINGS_CHUNK_SIZE];
+        int set_weather_settings_bulk(ref UsbDevice devh, int change_offset, byte[] data, int len)
+        {
+            byte[] buf = new byte[WEATHER_SETTINGS_CHUNK_SIZE];
 
-        //    // Make sure we're not trying to write outside the settings buffer.
-        //    assert((change_offset + len) < WEATHER_SETTINGS_CHUNK_SIZE);
+            // Make sure we're not trying to write outside the settings buffer.
+            Debug.Assert((change_offset + len) < WEATHER_SETTINGS_CHUNK_SIZE);
 
+            //get_settings_block_raw(h, buf, sizeof(buf));
+            GetSettingsBlockRaw(ref buf);
 
-        //    get_settings_block_raw(h, buf, sizeof(buf));
+            // Change the settings.
+            //memcpy(&buf[change_offset], data, len);
+            Array.Copy(data, 0, buf, change_offset, data.Length);
 
-        //    // Change the settings.
-        //    memcpy(&buf[change_offset], data, len);
+            // Send back the settings in 3 32-bit chunks.
+            for (change_offset = 0; change_offset < (32 * 3); change_offset += 32)
+        	{
+                byte[] newbuf = new byte[32];
+                Array.Copy(buf, change_offset, newbuf, 0, 32);
 
-        //	// Send back the settings in 3 32-bit chunks.
-        //	for (offset = 0; offset< (32 * 3); offset += 32)
-        //	{
+                //write_weather_32(h, offset, &buf[offset]);
+                Write_weather_32(ref devh, Convert.ToUInt16(change_offset), newbuf);
 
-        //        write_weather_32(h, offset, &buf[offset]);
+                //if (read_weather_ack(h) != 0)
+                int addr = 128;
+                if(Read_weather_ack(ref devh, addr) != 0)
+        		{
+        			return -1;
+        		}
+        	}
 
-        //		if (read_weather_ack(h) != 0)
-        //		{
-        //			return -1;
-        //		}
-        //	}
+            notify_weather_setting_change(ref devh);
 
-
-        //    notify_weather_setting_change(h);
-
-        //	return 0;
-        //}
+    	    return 0;
+        }
 
         int set_timezone(ref UsbDevice devh, sbyte timezone)
         {
@@ -476,18 +534,30 @@ namespace FineOffsetLib.HIDmgr
 
             return set_weather_setting(ref devh, 16, del, 1);
         }
+
+        int set_indoor_tmprt_units(ref UsbDevice devh, sbyte in_tmrpt_unit)
+        {
+            byte[] unit_setting = new byte[1];
+            //(Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius")
+            unit_setting[0] = Convert.ToByte(in_tmrpt_unit);
+
+            return set_weather_setting(ref devh, 17, unit_setting, 1);
+        }
         #endregion
 
-        #region Helpers for Write
+
+
+        #region Read and Write functions - high and low level
+
         //
         //Reads weather ack message when writing setting data.    
         //
-        int read_weather_ack(ref UsbDevice devh, int addr)
+        int Read_weather_ack(ref UsbDevice devh, int addr)
         {
             int i;
             byte[] buf = new byte[8];
 
-            read_weather_msg(ref devh, buf, addr);
+            Read_weather_msg(ref devh, buf, addr);
 
             // The ack should consist of just 0xa5.
             for (i = 0; i < 8; i++)
@@ -506,37 +576,40 @@ namespace FineOffsetLib.HIDmgr
         //
         // Writes 1 byte of data to the weather station.
         //
-        int write_weather_1(ref UsbDevice h, ushort addr, byte data)
+        int Write_weather_1(ref UsbDevice h, ushort addr, byte data)
         {
             byte[] msg = new byte[] { 0xa2, Convert.ToByte((addr) >> 8), Convert.ToByte(addr & 0xff), 0x20, 0xa2, data, 0, 0x20 };
 
-            send_usb_msgbuf(ref h, msg, 8);
+            Send_usb_msgbuf(ref h, msg, 8);
 
-            return read_weather_ack(ref h, addr);
+            return Read_weather_ack(ref h, addr);
         }
 
         //
         // Writes 32 bytes of data to the weather station.
         //
-        int write_weather_32(ref UsbDevice h, ushort addr, byte[] data)
+        int Write_weather_32(ref UsbDevice h, ushort addr, byte[] data)
         {
 
             byte[] msg = new byte[] { 0xa0, Convert.ToByte(addr >> 8), Convert.ToByte(addr & 0xff), 0x20, 0xa0, 0, 0, 0x20 };
 
 
-            send_usb_msgbuf(ref h, msg, 8);     // Send write command.
+            Send_usb_msgbuf(ref h, msg, 8);     // Send write command.
 
-            send_usb_msgbuf(ref h, data, 32);   // Send data.
+            Send_usb_msgbuf(ref h, data, 32);   // Send data.
 
-            return read_weather_ack(ref h, addr);
+            return Read_weather_ack(ref h, addr);
         }
 
-        #endregion
+
+
+
+
 
         //
         // All data from the weather station is read in 32 byte chunks.
         //
-        int read_weather_msg(ref UsbDevice devh, byte[] readBuffer, int address)
+        int Read_weather_msg(ref UsbDevice devh, byte[] readBuffer, int address)
         {
             int numBytes = 0;
 
@@ -550,11 +623,10 @@ namespace FineOffsetLib.HIDmgr
         }
 
 
-
         //
         // Sends a USB message to the device from a given buffer.
         //
-        int send_usb_msgbuf(ref UsbDevice h, byte[] msg, int msgsize)
+        int Send_usb_msgbuf(ref UsbDevice h, byte[] msg, int msgsize)
         {
             int bytes_written = 0;
             UsbSetupPacket usbPacket = new UsbSetupPacket();
@@ -581,6 +653,11 @@ namespace FineOffsetLib.HIDmgr
 
             return bytes_written;
         }
+
+
+        #endregion
+
+
 
 
         /// <summary>
@@ -635,6 +712,227 @@ namespace FineOffsetLib.HIDmgr
         }
 
 
+
+
+
+
+        #region Printing Functions. Basis for output functions
+
+        public void Print_summary(FOsettings ws, FOweatheritem item)
+        {
+            FOweatherdata wd = item.WeatherData;
+
+            bool contact = has_contact_with_sensor(item.WeatherData);
+
+            //Console.WriteLine("Use --help for more options.\n\n");
+
+            Console.WriteLine("Indoor:");
+            Console.WriteLine("  Temperature:\t\t{0} C", wd.in_temp * 0.1f);
+            Console.WriteLine("  Humidity:\t\t{0:d} %", Convert.ToInt32(Convert.ToByte(wd.in_humidity)));
+            Console.WriteLine("");
+            Console.WriteLine("Outdoor: {0}", (!contact) ? "NO CONTACT WITH SENSOR" : "");
+
+            // Only show current data if we have sensor contact.
+            if (contact)
+            {
+                Console.WriteLine("  Temperature:\t\t%0.1f C\n", wd.out_temp * 0.1f);
+                //Console.WriteLine("  Wind chill:\t\t%0.1f C\n", calculate_windchill(wd));
+                //Console.WriteLine("  Dewpoint:\t\t%0.1f C\n", calculate_dewpoint(wd));
+                Console.WriteLine("  Humidity:\t\t%u%%\n", wd.out_humidity);
+                Console.WriteLine("  Absolute pressure:\t%0.1f %s\n", wd.abs_pressure * 0.1f, _devSettings.pressure_unit);
+                //Console.WriteLine("  Relative pressure:\t%0.1f hPa\n", calculate_rel_pressure(wd));
+                //Console.WriteLine("  Average windspeed:\t%0.1f m/s\n", convert_avg_windspeed(wd));
+                //Console.WriteLine("  Gust wind speed:\t%2.1f m/s\n", convert_gust_windspeed(wd));
+                //Console.WriteLine("  Wind direction:\t%0.0f %s\n", wd.wind_direction * 22.5f, get_wind_direction(wd.wind_direction));
+                Console.WriteLine("  Total rain:\t\t%0.1f mm\n", wd.total_rain * 0.3f);
+            }
+
+            Console.WriteLine("\n");
+        }
+
+        //   1, 2010-09-13 13:41:34, 2010-08-13 14:46:53,  30,   53,  26.1,   55,  25.2,  15.5,  24.1,  1019.3,  1013.3,  3.1,   2,  5.8,   4,  10,  SW, 		   34,    10.2,     0.0,     0.0,     0.0,     0.0,     0.0,      0.0, 0, 0, 0, 0, 0, 0, 0, 0, 000100, 1E 35 05 01 37 FC 00 D1 27 1F 3A 00 0A 22 00 00 ,
+        public void Print_history_item(FOweatheritem item)
+        {
+            FOweatherdata wd = item.WeatherData;
+            int i;
+
+            //                  1      2    3     4      5     6    7    8    9   10	11	  12    13    14    15    16    17    18    19    20    21    22   23     24   25    26    27    28    29    30    31    32    33  34  35
+            //Console.WriteLine("{0:d}, {1}, {2}, {3:d}, {4:d}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}, {13}, {16}, {17}, {18}, {19}, {20}, {21}, {22}, {23}, {24}, {25}, {26}, {27}, {28}, {29}, {30}, {31}, {32}, {32}, {34}, {34}, {34}, ",
+            //    item.history_index,                                 // 1  Index.
+            //    DateTime.Now.ToLocalTime().ToString(),              // 2  Date/time of "read operation" from weather station.
+            //    get_timestamp(item.timestamp),                      // 3  Date/time data was recored.
+            //    Convert.ToByte(Convert.ToInt32(wd.delay)),          // 4  Minutes since previous reading.
+            //    Convert.ToByte(Convert.ToInt32(wd.in_humidity)),    // 5  Indoor humidity.
+            //    wd.in_temp * 0.1f,                                  // 6  Indoor temperature.
+            //    Convert.ToByte(Convert.ToInt32(wd.out_humidity)),   // 7  Outdoor humidity.
+            //    wd.out_temp * 0.1f,                                 // 8  Outdoor temperature.
+            //    "NA",//calculate_dewpoint(wd),           // 9  Dew point.
+            //    "NA",//calculate_windchill(wd),          // 10 Wind chill.
+            //    wd.abs_pressure * 0.1f,                        // 11 Absolute pressure.
+            //    wd.abs_pressure * 0.1f,                        // 12 Relative pressure. // TODO: Calculate this somehow!!!
+            //    "NA",//convert_avg_windspeed(wd),                      // 13 Wind average (m/s).
+            //    "NA",//calculate_beaufort(convert_avg_windspeed(wd)),  // 14 Wind average Beaufort. // TODO: Calculate this, integer.
+            //    "NA",//convert_gust_windspeed(wd),                     // 15 Wind gust (m/s).
+            //    "NA",//calculate_beaufort(convert_gust_windspeed(wd)), // 16 Wind gust (Beaufort). // TODO: Calculate this, integer.
+            //    wd.wind_direction * 22.5f,                     // 17 Wind direction.
+            //    "NA",//get_wind_direction(wd.wind_direction),         // 18 Wind direction, text.
+            //    wd.total_rain,                                 // 19 Rain ticks integer. Cumulative count of number of times rain gauge has tipped. Resets to zero if station's batteries removed
+            //    wd.total_rain * 0.3f,                          // 20 mm rain total. Column 19 * 0.3, but does not reset to zero, stays fixed until ticks catch up.
+            //    0.0,                                            // 21 Rain since last reading. mm
+            //    0.0,                                            // 22 Rain in last hour. mm
+            //    0.0,                                            // 23 Rain in last 24 hours. mm
+            //    0.0,                                            // 24 Rain in last 7 days. mm
+            //    0.0,                                            // 25 Rain in last 30 days. mm
+            //    0.0,                                            // 26 Rain total in last year? mm. This is the same as column 20 in my data
+            //    ((wd.status >> 0) & 0x1),                      // 27 Status bit 0.
+            //    ((wd.status >> 1) & 0x1),                      // 28 Status bit 1.
+            //    ((wd.status >> 2) & 0x1),                      // 29 Status bit 2.
+            //    ((wd.status >> 3) & 0x1),                      // 30 Status bit 3.
+            //    ((wd.status >> 4) & 0x1),                      // 31 Status bit 4.
+            //    ((wd.status >> 5) & 0x1),                      // 32 Status bit 5.
+            //    ((wd.status >> 6) & 0x1),                      // 33 Status bit 6.
+            //    ((wd.status >> 7) & 0x1),                      // 34 Status bit 7.
+            //    item.address);                                 // 35 Data address.
+            //for (i = 0; i < 16; i++)
+            //{
+            //    Console.Write("{0} ", wd.raw_data[i]);
+            //}
+            Console.WriteLine("{0:d}, " +
+                "{1}, {2}, {3}, {4}, {5}, {6}, ",// +
+                //"{7}, " +
+                //"{8}, " +
+                //"{9}, " +
+                //"{10}, {11}, {12}, {13}, {14}, {15}",
+                item.history_index,                                 // 1  Index.
+                //DateTime.Now.ToLocalTime().ToString(),              // 2  Date/time of "read operation" from weather station.
+                get_timestamp(item.timestamp),                      // 3  Date/time data was recored.
+                Convert.ToByte(Convert.ToInt32(wd.delay)),          // 4  Minutes since previous reading.
+                Convert.ToByte(Convert.ToInt32(wd.in_humidity)),    // 5  Indoor humidity.
+                wd.in_temp * 0.1f,                                  // 6  Indoor temperature.
+                wd.abs_pressure * 0.1f,                        // 11 Absolute pressure.
+                //((wd.status >> 0) & 0x1),                      // 27 Status bit 0.
+                //((wd.status >> 1) & 0x1),                      // 28 Status bit 1.
+                //((wd.status >> 2) & 0x1),                      // 29 Status bit 2.
+                //((wd.status >> 3) & 0x1),                      // 30 Status bit 3.
+                //((wd.status >> 4) & 0x1),                      // 31 Status bit 4.
+                //((wd.status >> 5) & 0x1),                      // 32 Status bit 5.
+                //((wd.status >> 6) & 0x1),                      // 33 Status bit 6.
+                //((wd.status >> 7) & 0x1),                      // 34 Status bit 7.
+                item.address);                                 // 35 Data address.
+
+
+            //Console.WriteLine("Item index: {0}", item.history_index);
+            //Console.WriteLine("Date/time of record data: {0}", get_timestamp(item.timestamp));
+            //Console.WriteLine("Raw Data:");
+            //Console.WriteLine("Minutes since previous reading: {0}", Convert.ToByte(Convert.ToInt32(wd.delay)));
+            //Console.WriteLine("Indoor humidity (%): {0}", Convert.ToByte(Convert.ToInt32(wd.in_humidity)));
+            //Console.WriteLine("Indoor temperature (degC): {0}", wd.in_temp * 0.1f);
+            //Console.WriteLine("Outdoor humidity (%): {0}", Convert.ToByte(Convert.ToInt32(wd.out_humidity)));
+            //Console.WriteLine("Outdoor temperature (degC): {0}", wd.out_temp * 0.1f);
+            //Console.WriteLine("Pressure: {0}", wd.abs_pressure);
+
+
+            //Console.WriteLine(",\n");
+        }
+
+        public void Print_status(FOsettings ws)
+        {
+            Console.WriteLine("Station settings:");
+            Console.WriteLine("  Magic number:\t\t\t0x{0}{1}", ws.magic_number[0], ws.magic_number[1] & 0xff);
+            Console.WriteLine("  Read period:\t\t\t{0} minutes", ws.read_period);
+            Console.WriteLine("  Timezone:\t\t\tCET{0}{1}", (ws.timezone > 0) ? "+" : "-", ws.timezone);
+            Console.WriteLine("  Data count:\t\t\t{0} out of {1} ({2}%)", ws.data_count, HISTORY_MAX, (float)ws.data_count / HISTORY_MAX * 100);
+            Console.WriteLine("  Current memory position:\t{0} (0x{1})", ws.current_pos, ws.current_pos);
+            //Console.WriteLine("  Current Relative pressure:\t{0} hPa", calculate_relative_pressure(ws.relative_pressure));
+            Console.WriteLine("  Current Absolute pressure:\t{0} {1}", ws.absolute_pressure * 0.1f, ws.pressure_unit);
+            Console.Write("  Unknown bytes:\t\t0x");
+            {
+                int i;
+                for (i = 0; i < 7; i++) Console.Write("{0}", ws.unknown[i]);
+            }
+            Console.WriteLine("");
+            Console.Write("  Station date/time:\t\t");       Print_bcd_date(ws.datetime);
+            Console.WriteLine("");
+        }
+
+        public void Print_settings(FOsettings ws)
+        {
+            Console.WriteLine("Unit settings:");
+            Console.WriteLine("  Indoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius");
+            Console.WriteLine("  Outdoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 1))) ? "Fahrenheit" : "Celcius");
+            Console.WriteLine("  Rain unit:\t\t\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 2))) ? "mm" : "inch");
+
+            Console.Write("  Pressure unit:\t\t");
+            if (Convert.ToBoolean(ws.unit_settings1 & (1 << 5)))
+                Console.Write("hPa");
+            else if (Convert.ToBoolean(ws.unit_settings1 & (1 << 6)))
+                Console.Write("inHg");
+            else if (Convert.ToBoolean(ws.unit_settings1 & (1 << 7)))
+                Console.Write("mmHg");
+            Console.WriteLine("");
+
+            Console.Write("  Wind speed unit:\t\t");
+            if (Convert.ToBoolean(ws.unit_settings2 & (1 << 0)))
+                Console.Write("m/s");
+            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 1)))
+                Console.Write("km/h");
+            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 2)))
+                Console.Write("knot");
+            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 3)))
+                Console.Write("m/h");
+            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 4)))
+                Console.Write("bft");
+            Console.WriteLine("");
+
+            Console.WriteLine("Display settings:");
+            Console.WriteLine("  Pressure:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 0)) ? "Relative" : "Absolute");
+            Console.WriteLine("  Wind speed:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 1)) ? "Gust" : "Average");
+            Console.WriteLine("  Time:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 2)) ? "12 hour" : "24 hour");
+            Console.WriteLine("  Date:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 3)) ? "Month-day-year" : "Day-month-year");
+            Console.WriteLine("  Time scale:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 4)) ? "24 hour" : "12 hour");
+
+            Console.Write("  Date:\t\t\t\t");
+            if (Convert.ToBoolean(ws.display_options1 & (1 << 5)))
+                Console.Write("Show year");
+            else if (Convert.ToBoolean(ws.display_options1 & (1 << 6)))
+                Console.Write("Show day name");
+            else if (Convert.ToBoolean(ws.display_options1 & (1 << 7)))
+                Console.Write("Alarm time");
+            Console.WriteLine("");
+
+            Console.Write("  Outdoor temperature:\t\t");
+            if (Convert.ToBoolean(ws.display_options2 & (1 << 0)))
+                Console.Write("Temperature");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 1)))
+                Console.Write("Wind chill");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 2)))
+                Console.Write("Dew point");
+            Console.WriteLine(" ");
+
+            Console.Write("  Rain:\t\t\t\t");
+            if (Convert.ToBoolean(ws.display_options2 & (1 << 3)))
+                Console.Write("Hour");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 4)))
+                Console.Write("Day");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 5)))
+                Console.Write("Week");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 6)))
+                Console.Write("Month");
+            else if (Convert.ToBoolean(ws.display_options2 & (1 << 7)))
+                Console.Write("Total");
+            Console.WriteLine("\n");
+        }
+
+        public void Print_bcd_date(byte[] date)
+        {
+            bcd_date_t d = parse_bcd_date(date);
+            Console.WriteLine("{0}-{1}-{2} {3}:{4}:00", d.year, d.month, d.day, d.hour, d.minute);
+        }
+
+        #endregion
+
+        #region Helpers
+
         //
         // Parses a date in BCD format (http://en.wikipedia.org/wiki/Binary-coded_decimal).
         // Each nibble of each byte corresponds to one number. The first byte contains the year.
@@ -676,189 +974,6 @@ namespace FineOffsetLib.HIDmgr
             return rawtime;
         }
 
-
-
-
-
-
-        public void print_summary(FOsettings ws, FOweatheritem item)
-        {
-            FOweatherdata wd = item.WeatherData;
-
-            bool contact = has_contact_with_sensor(item.WeatherData);
-
-            Console.WriteLine("Use --help for more options.\n\n");
-
-            Console.WriteLine("Indoor:");
-            Console.WriteLine("  Temperature:\t\t{0} C", wd.in_temp * 0.1f);
-            Console.WriteLine("  Humidity:\t\t{0:d} %", Convert.ToInt32(Convert.ToByte(wd.in_humidity)));
-            Console.WriteLine("");
-            Console.WriteLine("Outdoor: {0}", (!contact) ? "NO CONTACT WITH SENSOR" : "");
-
-            // Only show current data if we have sensor contact.
-            if (contact)
-            {
-                Console.WriteLine("  Temperature:\t\t%0.1f C\n", wd.out_temp * 0.1f);
-                //Console.WriteLine("  Wind chill:\t\t%0.1f C\n", calculate_windchill(wd));
-                //Console.WriteLine("  Dewpoint:\t\t%0.1f C\n", calculate_dewpoint(wd));
-                Console.WriteLine("  Humidity:\t\t%u%%\n", wd.out_humidity);
-                Console.WriteLine("  Absolute pressure:\t%0.1f hPa\n", wd.abs_pressure * 0.1f);
-                //Console.WriteLine("  Relative pressure:\t%0.1f hPa\n", calculate_rel_pressure(wd));
-                //Console.WriteLine("  Average windspeed:\t%0.1f m/s\n", convert_avg_windspeed(wd));
-                //Console.WriteLine("  Gust wind speed:\t%2.1f m/s\n", convert_gust_windspeed(wd));
-                //Console.WriteLine("  Wind direction:\t%0.0f %s\n", wd.wind_direction * 22.5f, get_wind_direction(wd.wind_direction));
-                Console.WriteLine("  Total rain:\t\t%0.1f mm\n", wd.total_rain * 0.3f);
-            }
-
-            Console.WriteLine("\n");
-        }
-
-        //   1, 2010-09-13 13:41:34, 2010-08-13 14:46:53,  30,   53,  26.1,   55,  25.2,  15.5,  24.1,  1019.3,  1013.3,  3.1,   2,  5.8,   4,  10,  SW, 		   34,    10.2,     0.0,     0.0,     0.0,     0.0,     0.0,      0.0, 0, 0, 0, 0, 0, 0, 0, 0, 000100, 1E 35 05 01 37 FC 00 D1 27 1F 3A 00 0A 22 00 00 ,
-        public void print_history_item(FOweatheritem item)
-        {
-            FOweatherdata wd = item.WeatherData;
-            int i;
-
-            //                  1      2    3     4      5     6    7    8    9   10	11	  12    13    14    15    16    17    18    19    20    21    22   23     24   25    26    27    28    29    30    31    32    33  34  35
-            Console.WriteLine("{0:d}, {1}, {2}, {3:d}, {4:d}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}, {13}, {16}, {17}, {18}, {19}, {20}, {21}, {22}, {23}, {24}, {25}, {26}, {27}, {28}, {29}, {30}, {31}, {32}, {32}, {34}, {34}, {34}, ",
-                item.history_index,                                 // 1  Index.
-                DateTime.Now.ToLocalTime().ToString(),              // 2  Date/time of "read operation" from weather station.
-                get_timestamp(item.timestamp),                      // 3  Date/time data was recored.
-                Convert.ToByte(Convert.ToInt32(wd.delay)),          // 4  Minutes since previous reading.
-                Convert.ToByte(Convert.ToInt32(wd.in_humidity)),    // 5  Indoor humidity.
-                wd.in_temp * 0.1f,                                  // 6  Indoor temperature.
-                Convert.ToByte(Convert.ToInt32(wd.out_humidity)),   // 7  Outdoor humidity.
-                wd.out_temp * 0.1f,                                 // 8  Outdoor temperature.
-                "NA",//calculate_dewpoint(wd),           // 9  Dew point.
-                "NA",//calculate_windchill(wd),          // 10 Wind chill.
-                wd.abs_pressure * 0.1f,                        // 11 Absolute pressure.
-                wd.abs_pressure * 0.1f,                        // 12 Relative pressure. // TODO: Calculate this somehow!!!
-                "NA",//convert_avg_windspeed(wd),                      // 13 Wind average (m/s).
-                "NA",//calculate_beaufort(convert_avg_windspeed(wd)),  // 14 Wind average Beaufort. // TODO: Calculate this, integer.
-                "NA",//convert_gust_windspeed(wd),                     // 15 Wind gust (m/s).
-                "NA",//calculate_beaufort(convert_gust_windspeed(wd)), // 16 Wind gust (Beaufort). // TODO: Calculate this, integer.
-                wd.wind_direction * 22.5f,                     // 17 Wind direction.
-                "NA",//get_wind_direction(wd.wind_direction),         // 18 Wind direction, text.
-                wd.total_rain,                                 // 19 Rain ticks integer. Cumulative count of number of times rain gauge has tipped. Resets to zero if station's batteries removed
-                wd.total_rain * 0.3f,                          // 20 mm rain total. Column 19 * 0.3, but does not reset to zero, stays fixed until ticks catch up.
-                0.0,                                            // 21 Rain since last reading. mm
-                0.0,                                            // 22 Rain in last hour. mm
-                0.0,                                            // 23 Rain in last 24 hours. mm
-                0.0,                                            // 24 Rain in last 7 days. mm
-                0.0,                                            // 25 Rain in last 30 days. mm
-                0.0,                                            // 26 Rain total in last year? mm. This is the same as column 20 in my data
-                ((wd.status >> 0) & 0x1),                      // 27 Status bit 0.
-                ((wd.status >> 1) & 0x1),                      // 28 Status bit 1.
-                ((wd.status >> 2) & 0x1),                      // 29 Status bit 2.
-                ((wd.status >> 3) & 0x1),                      // 30 Status bit 3.
-                ((wd.status >> 4) & 0x1),                      // 31 Status bit 4.
-                ((wd.status >> 5) & 0x1),                      // 32 Status bit 5.
-                ((wd.status >> 6) & 0x1),                      // 33 Status bit 6.
-                ((wd.status >> 7) & 0x1),                      // 34 Status bit 7.
-                item.address);                                 // 35 Data address.
-
-            for (i = 0; i < 16; i++)
-            {
-                Console.WriteLine("{0} ", wd.raw_data[i]);
-            }
-
-            Console.WriteLine(",\n");
-        }
-
-        public void print_status(FOsettings ws)
-        {
-            Console.WriteLine("Magic number:\t\t\t0x{0}{1}", ws.magic_number[0], ws.magic_number[1] & 0xff);
-            Console.WriteLine("Read period:\t\t\t{0} minutes", ws.read_period);
-            Console.WriteLine("Timezone:\t\t\tCET{0}{1}", (ws.timezone > 0) ? "+" : "-", ws.timezone);
-            Console.WriteLine("Data count:\t\t\t{0} out of {1} ({2}%)", ws.data_count, HISTORY_MAX, (float)ws.data_count / HISTORY_MAX * 100);
-            Console.WriteLine("Current memory position:\t{0} (0x{1})", ws.current_pos, ws.current_pos);
-            Console.WriteLine("Current relative pressure:\t{0} hPa", ws.relative_pressure * 0.1f);
-            Console.WriteLine("Current Absolute pressure:\t{0} hPa", ws.absolute_pressure * 0.1f);
-            Console.Write("Unknown bytes:\t\t\t0x");
-            {
-                int i;
-                for (i = 0; i < 7; i++) Console.Write("{0}", ws.unknown[i]);
-            }
-            Console.WriteLine("");
-            Console.Write("Station date/time:\t\t");
-            print_bcd_date(ws.datetime);
-            Console.WriteLine("");
-        }
-
-        public void print_settings(FOsettings ws)
-        {
-            Console.WriteLine("Unit settings:");
-            Console.WriteLine("  Indoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius");
-            Console.WriteLine("  Outdoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 1))) ? "Fahrenheit" : "Celcius");
-            Console.WriteLine("  Rain unit:\t\t\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 2))) ? "mm" : "inch");
-
-            Console.Write("  Pressure unit:\t\t");
-            if (Convert.ToBoolean(ws.unit_settings1 & (1 << 5)))
-                Console.Write("hPa");
-            else if (Convert.ToBoolean(ws.unit_settings1 & (1 << 6)))
-                Console.Write("inHg");
-            else if (Convert.ToBoolean(ws.unit_settings1 & (1 << 7)))
-                Console.Write("mmHg");
-            Console.WriteLine("");
-
-            Console.Write("  Wind speed unit:\t\t");
-            if (Convert.ToBoolean(ws.unit_settings2 & (1 << 0)))
-                Console.Write("m/s");
-            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 1)))
-                Console.Write("km/h");
-            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 2)))
-                Console.Write("knot");
-            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 3)))
-                Console.Write("m/h");
-            else if (Convert.ToBoolean(ws.unit_settings2 & (1 << 4)))
-                Console.Write("bft");
-            Console.WriteLine("");
-
-            Console.WriteLine("Display settings:");
-            Console.WriteLine("  Pressure:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 0)) ? "Relative" : "Absolute");
-            Console.WriteLine("  Wind speed:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 1)) ? "Gust" : "Average");
-            Console.WriteLine("  Time:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 2)) ? "12 hour" : "24 hour");
-            Console.WriteLine("  Date:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 3)) ? "Month-day-year" : "Day-month-year");
-            Console.WriteLine("  Time scale:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 4)) ? "24 hour" : "12 hour");
-
-            Console.Write("  Date:\t\t\t\t");
-            if (Convert.ToBoolean(ws.display_options1 & (1 << 5)))
-                Console.Write("Show year year");
-            else if (Convert.ToBoolean(ws.display_options1 & (1 << 6)))
-                Console.Write("Show day name");
-            else if (Convert.ToBoolean(ws.display_options1 & (1 << 7)))
-                Console.Write("Alarm time");
-            Console.WriteLine("");
-
-            Console.Write("  Outdoor temperature:\t\t");
-            if (Convert.ToBoolean(ws.display_options2 & (1 << 0)))
-                Console.Write("Temperature");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 1)))
-                Console.Write("Wind chill");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 2)))
-                Console.Write("Dew point");
-            Console.WriteLine("\n");
-
-            Console.Write("  Rain:\t\t\t\t");
-            if (Convert.ToBoolean(ws.display_options2 & (1 << 3)))
-                Console.Write("Hour");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 4)))
-                Console.Write("Day");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 5)))
-                Console.Write("Week");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 6)))
-                Console.Write("Month");
-            else if (Convert.ToBoolean(ws.display_options2 & (1 << 7)))
-                Console.Write("Total");
-            Console.WriteLine("\n");
-        }
-
-        void print_bcd_date(byte[] date)
-        {
-            bcd_date_t d = parse_bcd_date(date);
-            Console.WriteLine("{0}-{1}-{2} {3}:{4}:00", d.year, d.month, d.day, d.hour, d.minute);
-        }
-
         private DateTime get_timestamp(long timestamp)
         {
             return (new DateTime(1970, 1, 1) + new TimeSpan(0, 0, Convert.ToInt32(timestamp / 1000)));
@@ -868,5 +983,7 @@ namespace FineOffsetLib.HIDmgr
         {
             return !Convert.ToBoolean((Convert.ToInt32(wdp.status) >> Convert.ToInt32(LOST_SENSOR_CONTACT_BIT)) & 0x1);
         }
+
+        #endregion
     }
 }

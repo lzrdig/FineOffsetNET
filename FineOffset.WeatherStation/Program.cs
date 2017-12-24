@@ -30,7 +30,7 @@ namespace FineOffset.WeatherStation
                 // Find and open the usb device.
                 MyUsbDevice = UsbDevice.OpenUsbDevice(MyUsbFinder);
 
-                // If the device is open and ready
+                // Cheeck if the device is open and ready
                 if (MyUsbDevice == null) throw new Exception("Device Not Found.");
 
                 IUsbDevice wholeUsbDevice = MyUsbDevice as IUsbDevice;
@@ -43,23 +43,24 @@ namespace FineOffset.WeatherStation
                     ec = myDevMGr.InitDevInterface();
 
                     if(ec == ErrorCode.None) {
+                        Debug.WriteLine("Read the block with the device settings.\n");
                         ws = myDevMGr.WSettings;
 
-                        int items_to_read = 1;
+                        int items_to_read = 10;
 
                         Debug.WriteLine("Start reading history blocks\n");
                         myDevMGr.GetWeatherData(items_to_read);
 
-                        
+                        myDevMGr.Print_summary(ws, myDevMGr.History[HISTORY_MAX - items_to_read]);
+
                         Debug.WriteLine("Index\tTimestamp\t\tDelay\n");
+                        Console.WriteLine("Index\tTimestamp\t\tDelay\n");
                         for (int j=0;j< items_to_read;j++)
-                            myDevMGr.print_summary(ws, myDevMGr.History[HISTORY_MAX - items_to_read]);
+                            myDevMGr.Print_history_item(myDevMGr.History[HISTORY_MAX - 1 - j]);
 
-                        //myDevMGr.print_history_item(myDevMGr.History[HISTORY_MAX - 1]);
+                        myDevMGr.Print_status(ws);
 
-                       // myDevMGr.print_status(ws);
-
-                        myDevMGr.print_settings(ws);
+                        myDevMGr.Print_settings(ws);
                     }
                 }
                 

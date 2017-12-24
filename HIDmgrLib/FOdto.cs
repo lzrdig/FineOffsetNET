@@ -1,10 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace FineOffsetLib.WSdataStructs {
+﻿namespace FineOffsetLib.WSdataStructs
+{
     public class FOsettings {
         // The weather station stores signed shorts in a non-standard way.
         // Instead of two's compliment, sign-magnitude is used (8-bit is sign).
@@ -90,57 +85,57 @@ namespace FineOffsetLib.WSdataStructs {
                                            // the next record becomes current.
                                            // Substract 256 and divide by 16 to get the number of saved history entries.
 
-        public ushort relative_pressure;   // Current relative (sea level) atmospheric pressure, multiply by 0.1 to get hPa.
-        public ushort absolute_pressure;   // Current absolute atmospheric pressure, multiply by 0.1 to get hPa.
-        public byte[] unknown = new byte[7];           // Usually all zero, but have also seen 0x4A7600F724030E. If you have something different, let me know!
-        public byte[] datetime = new byte[5];          // Date-time values are stored as year (last two digits), month, day, hour and minute in binary coded decimal, two digits per byte.
-        public byte alarm_inhumid_high;   // alarm, indoor humidity, high.
-        public byte alarm_inhumid_low;    // alarm, indoor humidity, low.
-        public short alarm_intemp_high = 0;            // alarm, indoor temperature, high. Multiply by 0.1 to get °C.
-        public short alarm_intemp_low = 0;             // alarm, indoor temperature, low. Multiply by 0.1 to get °C.
-        public short alarm_outhumid_high = 0;  // alarm, outdoor humidity, high.
-        public short alarm_outhumid_low = 0;   // alarm, outdoor humidity, low
-        public short alarm_outtemp_high = 0;           // alarm, outdoor temperature, high. Multiply by 0.1 to get °C.
-        public short alarm_outtemp_low = 0;            // alarm, outdoor temperature, low. Multiply by 0.1 to get °C.
-        public short alarm_windchill_high = 0;         // alarm, wind chill, high. Multiply by 0.1 to get °C.
-        public short alarm_windchill_low = 0;          // alarm, wind chill, low. Multiply by 0.1 to get °C.
-        public short alarm_dewpoint_high = 0;          // alarm, dew point, high. Multiply by 0.1 to get °C.
-        public short alarm_dewpoint_low = 0;           // alarm, dew point, low. Multiply by 0.1 to get °C.
-        public short alarm_abs_pressure_high = 0;      // alarm, absolute pressure, high. Multiply by 0.1 to get hPa.
-        public short alarm_abs_pressure_low = 0;       // alarm, absolute pressure, low. Multiply by 0.1 to get hPa.
-        public short alarm_rel_pressure_high = 0;      // alarm, relative pressure, high. Multiply by 0.1 to get hPa.
-        public short alarm_rel_pressure_low = 0;       // alarm, relative pressure, low. Multiply by 0.1 to get hPa.
-        public short alarm_avg_wspeed_beaufort = 0; // alarm, average wind speed, Beaufort.
-        public short alarm_avg_wspeed_ms = 0;  // alarm, average wind speed, m/s. Multiply by 0.1 to get m/s.
-        public short alarm_gust_wspeed_beaufort = 0; // alarm, gust wind speed, Beaufort.
-        public short alarm_gust_wspeed_ms = 0; // alarm, gust wind speed, m/s. Multiply by 0.1 to get m/s.
-        public short alarm_wind_direction = 0; // alarm, wind direction. Multiply by 22.5 to get ° from north.
-        public ushort alarm_rain_hourly = 0;   // alarm, rain, hourly. Multiply by 0.3 to get mm.
-        public ushort alarm_rain_daily = 0;    // alarm, rain, daily. Multiply by 0.3 to get mm.
-        public ushort alarm_time = 0;          // Hour & Time. BCD (http://en.wikipedia.org/wiki/Binary-coded_decimal)
-        public short max_inhumid = 0;          // maximum, indoor humidity, value.
-        public short min_inhumid = 0;          // minimum, indoor humidity, value.
-        public short max_outhumid = 0;         // maximum, outdoor humidity, value.
-        public short min_outhumid = 0;         // minimum, outdoor humidity, value.
-        public short max_intemp = 0;                   // maximum, indoor temperature, value. Multiply by 0.1 to get °C.
-        public short min_intemp = 0;                   // minimum, indoor temperature, value. Multiply by 0.1 to get °C.
-        public short max_outtemp;                  // maximum, outdoor temperature, value. Multiply by 0.1 to get °C.
-        public short min_outtemp;                  // minimum, outdoor temperature, value. Multiply by 0.1 to get °C.
-        public short max_windchill;                // maximum, wind chill, value. Multiply by 0.1 to get °C.
-        public short min_windchill;                // minimum, wind chill, value. Multiply by 0.1 to get °C.
-        public short max_dewpoint;                 // maximum, dew point, value. Multiply by 0.1 to get °C.
-        public short min_dewpoint;                 // minimum, dew point, value. Multiply by 0.1 to get °C.
-        public ushort max_abs_pressure;    // maximum, absolute pressure, value. Multiply by 0.1 to get hPa.
-        public ushort min_abs_pressure;    // minimum, absolute pressure, value. Multiply by 0.1 to get hPa.
-        public ushort max_rel_pressure;    // maximum, relative pressure, value. Multiply by 0.1 to get hPa.
-        public ushort min_rel_pressure;    // minimum, relative pressure, value. Multiply by 0.1 to get hPa.
-        public ushort max_avg_wspeed;      // maximum, average wind speed, value. Multiply by 0.1 to get m/s.
-        public ushort max_gust_wspeed;     // maximum, gust wind speed, value. Multiply by 0.1 to get m/s.
-        public ushort max_rain_hourly;     // maximum, rain hourly, value. Multiply by 0.3 to get mm.
-        public ushort max_rain_daily;      // maximum, rain daily, value. Multiply by 0.3 to get mm.
-        public ushort max_rain_weekly;     // maximum, rain weekly, value. Multiply by 0.3 to get mm.
-        public ushort max_rain_monthly;    // maximum, rain monthly, value. Multiply by 0.3 to get mm.
-        public ushort max_rain_total;      // maximum, rain total, value. Multiply by 0.3 to get mm.
+        public ushort relative_pressure;                // Current relative (sea level) atmospheric pressure, multiply by 0.1 to get hPa.
+        public ushort absolute_pressure;                // Current absolute atmospheric pressure, multiply by 0.1 to get hPa.
+        public byte[] unknown = new byte[7];            // Usually all zero, but have also seen 0x4A7600F724030E. If you have something different, let me know!
+        public byte[] datetime = new byte[5];           // Date-time values are stored as year (last two digits), month, day, hour and minute in binary coded decimal, two digits per byte.
+        public byte alarm_inhumid_high;                 // alarm, indoor humidity, high.
+        public byte alarm_inhumid_low;                  // alarm, indoor humidity, low.
+        public short alarm_intemp_high = 0;             // alarm, indoor temperature, high. Multiply by 0.1 to get °C.
+        public short alarm_intemp_low = 0;              // alarm, indoor temperature, low. Multiply by 0.1 to get °C.
+        public short alarm_outhumid_high = 0;           // alarm, outdoor humidity, high.
+        public short alarm_outhumid_low = 0;            // alarm, outdoor humidity, low
+        public short alarm_outtemp_high = 0;            // alarm, outdoor temperature, high. Multiply by 0.1 to get °C.
+        public short alarm_outtemp_low = 0;             // alarm, outdoor temperature, low. Multiply by 0.1 to get °C.
+        public short alarm_windchill_high = 0;          // alarm, wind chill, high. Multiply by 0.1 to get °C.
+        public short alarm_windchill_low = 0;           // alarm, wind chill, low. Multiply by 0.1 to get °C.
+        public short alarm_dewpoint_high = 0;           // alarm, dew point, high. Multiply by 0.1 to get °C.
+        public short alarm_dewpoint_low = 0;            // alarm, dew point, low. Multiply by 0.1 to get °C.
+        public short alarm_abs_pressure_high = 0;       // alarm, absolute pressure, high. Multiply by 0.1 to get hPa.
+        public short alarm_abs_pressure_low = 0;        // alarm, absolute pressure, low. Multiply by 0.1 to get hPa.
+        public short alarm_rel_pressure_high = 0;       // alarm, relative pressure, high. Multiply by 0.1 to get hPa.
+        public short alarm_rel_pressure_low = 0;        // alarm, relative pressure, low. Multiply by 0.1 to get hPa.
+        public short alarm_avg_wspeed_beaufort = 0;     // alarm, average wind speed, Beaufort.
+        public short alarm_avg_wspeed_ms = 0;           // alarm, average wind speed, m/s. Multiply by 0.1 to get m/s.
+        public short alarm_gust_wspeed_beaufort = 0;    // alarm, gust wind speed, Beaufort.
+        public short alarm_gust_wspeed_ms = 0;          // alarm, gust wind speed, m/s. Multiply by 0.1 to get m/s.
+        public short alarm_wind_direction = 0;          // alarm, wind direction. Multiply by 22.5 to get ° from north.
+        public ushort alarm_rain_hourly = 0;            // alarm, rain, hourly. Multiply by 0.3 to get mm.
+        public ushort alarm_rain_daily = 0;             // alarm, rain, daily. Multiply by 0.3 to get mm.
+        public ushort alarm_time = 0;                   // Hour & Time. BCD (http://en.wikipedia.org/wiki/Binary-coded_decimal)
+        public short max_inhumid = 0;                   // maximum, indoor humidity, value.
+        public short min_inhumid = 0;                   // minimum, indoor humidity, value.
+        public short max_outhumid = 0;                  // maximum, outdoor humidity, value.
+        public short min_outhumid = 0;                  // minimum, outdoor humidity, value.
+        public short max_intemp = 0;                    // maximum, indoor temperature, value. Multiply by 0.1 to get °C.
+        public short min_intemp = 0;                    // minimum, indoor temperature, value. Multiply by 0.1 to get °C.
+        public short max_outtemp;                       // maximum, outdoor temperature, value. Multiply by 0.1 to get °C.
+        public short min_outtemp;                       // minimum, outdoor temperature, value. Multiply by 0.1 to get °C.
+        public short max_windchill;                     // maximum, wind chill, value. Multiply by 0.1 to get °C.
+        public short min_windchill;                     // minimum, wind chill, value. Multiply by 0.1 to get °C.
+        public short max_dewpoint;                      // maximum, dew point, value. Multiply by 0.1 to get °C.
+        public short min_dewpoint;                      // minimum, dew point, value. Multiply by 0.1 to get °C.
+        public ushort max_abs_pressure;                 // maximum, absolute pressure, value. Multiply by 0.1 to get hPa.
+        public ushort min_abs_pressure;                 // minimum, absolute pressure, value. Multiply by 0.1 to get hPa.
+        public ushort max_rel_pressure;                 // maximum, relative pressure, value. Multiply by 0.1 to get hPa.
+        public ushort min_rel_pressure;                 // minimum, relative pressure, value. Multiply by 0.1 to get hPa.
+        public ushort max_avg_wspeed;                   // maximum, average wind speed, value. Multiply by 0.1 to get m/s.
+        public ushort max_gust_wspeed;                  // maximum, gust wind speed, value. Multiply by 0.1 to get m/s.
+        public ushort max_rain_hourly;                  // maximum, rain hourly, value. Multiply by 0.3 to get mm.
+        public ushort max_rain_daily;                   // maximum, rain daily, value. Multiply by 0.3 to get mm.
+        public ushort max_rain_weekly;                  // maximum, rain weekly, value. Multiply by 0.3 to get mm.
+        public ushort max_rain_monthly;                 // maximum, rain monthly, value. Multiply by 0.3 to get mm.
+        public ushort max_rain_total;                   // maximum, rain total, value. Multiply by 0.3 to get mm.
         public byte[] max_inhumid_date = new byte[5];  // maximum, indoor humidity, when. Datetime in BCD-format.
         public byte[] min_inhumid_date = new byte[5];  // minimum, indoor humidity, when. Datetime in BCD-format.
         public byte[] max_outhumid_date = new byte[5]; // maximum, outdoor humidity, when. Datetime in BCD-format.
@@ -164,6 +159,9 @@ namespace FineOffsetLib.WSdataStructs {
         public byte[] max_rain_weekly_date = new byte[5]; // maximum, rain weekly, when. Datetime in BCD-format.
         public byte[] max_rain_monthly_date = new byte[5]; // maximum, rain monthly, when. Datetime in BCD-format.
         public byte[] max_rain_total_date = new byte[5]; // maximum, rain total, when. Datetime in BCD-format.
+
+        public string pressure_unit = "hPa";
+        public string indoor_temperature_unit = "Celsius";
         //}
         //weather_settings_t;
 
@@ -225,4 +223,14 @@ namespace FineOffsetLib.WSdataStructs {
         public int tm_yday;  // days since January 1 - [0, 365]
         public int tm_isdst; // daylight savings time flag
     }
+
+    public enum TemprtUnits
+    {
+        Celsius , Fahrenheight
+    };
+
+    public enum PressureUnits
+    {
+        hPa, inHg, mmHg
+    };
 }
