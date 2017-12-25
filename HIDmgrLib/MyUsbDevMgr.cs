@@ -21,14 +21,24 @@ namespace FineOffsetLib.HIDmgr
         public const uint LOST_SENSOR_CONTACT_BIT = 6;
         public const uint RAIN_COUNTER_OVERFLOW_BIT = 7;
 
+        private const byte EndMark = 0x20;
+        private const byte ReadCommand = 0xA1;
+        private const byte WriteCommand = 0xA0;
+        private const byte WriteCommandWord = 0xA2;
+
+
         private UsbDevice _usbDev;
         private FOsettings _devSettings;
         private FOweatheritem[] _history = new FOweatheritem[HISTORY_MAX];
 
+        private byte[] _devSettingsBytes = new byte[WEATHER_SETTINGS_CHUNK_SIZE];
 
         private UsbInterfaceInfo _usbInterfaceInfo = null;
         private UsbEndpointInfo _usbEndpointInfo = null;
         private UsbEndpointReader _reader = null;
+        private UsbEndpointWriter _writer = null;
+
+        #region Constructors
 
         public MyUsbDevMgr(IUsbDevice usbDev)
         {
@@ -46,6 +56,9 @@ namespace FineOffsetLib.HIDmgr
             }
 
         }
+
+        #endregion
+
 
         #region Properties
 
@@ -70,6 +83,8 @@ namespace FineOffsetLib.HIDmgr
 
         #endregion
 
+
+        #region Interface
 
         public void CloseDevHndl()
         {
@@ -139,18 +154,21 @@ namespace FineOffsetLib.HIDmgr
 
         }
 
+        #endregion
+
 
         #region GetFunctions
 
         private FOsettings GetSettings()
         {
-            bool bValidDev = _usbDev is null;
-
-            if (!bValidDev)
+            if (_usbDev != null)
             {
-                byte[] readBuffer = new byte[256];
+                byte[] readBuffer = new byte[WEATHER_SETTINGS_CHUNK_SIZE];
 
                 GetSettingsBlockRaw(ref readBuffer);
+
+                if(readBuffer.Length == WEATHER_SETTINGS_CHUNK_SIZE)
+                Array.Copy(readBuffer, _devSettingsBytes, WEATHER_SETTINGS_CHUNK_SIZE);
 
 
                 _devSettings.magic_number[0] = readBuffer[0];
@@ -504,7 +522,7 @@ namespace FineOffsetLib.HIDmgr
                 Array.Copy(buf, change_offset, newbuf, 0, 32);
 
                 //write_weather_32(h, offset, &buf[offset]);
-                Write_weather_32(ref devh, Convert.ToUInt16(change_offset), newbuf);
+                //Write_weather_32(ref devh, Convert.ToUInt16(change_offset), newbuf);
 
                 //if (read_weather_ack(h) != 0)
                 int addr = 128;
@@ -535,43 +553,100 @@ namespace FineOffsetLib.HIDmgr
             return set_weather_setting(ref devh, 16, del, 1);
         }
 
-        int set_indoor_tmprt_units(ref UsbDevice devh, sbyte in_tmrpt_unit)
+        private int set_indoor_tmprt_units(ref UsbDevice devh, byte in_tmrpt_unit)
         {
-            byte[] unit_setting = new byte[1];
-            //(Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius")
-            unit_setting[0] = Convert.ToByte(in_tmrpt_unit);
+            byte[] unit_setting1 = new byte[1];
 
-            return set_weather_setting(ref devh, 17, unit_setting, 1);
+            //(Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius")
+            unit_setting1[0] = 67;
+
+            int result = set_weather_setting(ref devh, 17, unit_setting1, 1);
+
+            return result;
+        }
+
+        public void SetTmrptLowLevel()
+        {
+            byte[] in_tmrpt_unit = new byte[1];
+
+            // Toggle temperature unit bit
+            in_tmrpt_unit[0] = (byte)( _devSettings.unit_settings1 ^ (1 >> 0));
+
+            int result = set_indoor_tmprt_units(ref _usbDev, in_tmrpt_unit[0]);
+            //set_weather_settings_bulk(ref _usbDev, 17, in_tmrpt_unit, 8);
+        }
+        public void SetIndoorTmrptUnits()
+        {
+            byte[] in_tmrpt_unit = new byte[1];
+            UsbInterfaceInfo usbInterfaceInfo = null;
+            UsbEndpointInfo usbEndpointInfo = null;
+            int lengthTransferred = 0;
+            ErrorCode ec = ErrorCode.None;
+
+            //set_indoor_tmprt_units(ref _usbDev, in_tmrpt_unit[0]);
+            //set_weather_settings_bulk(ref _usbDev, 17, in_tmrpt_unit, 8);
+
+            // Look and see if its endpoint matches UsbConstants.ENDPOINT_DIR_MASK
+            UsbEndpointBase.LookupEndpointInfo(_usbDev.Configs[0], UsbConstants.ENDPOINT_DIR_MASK, out usbInterfaceInfo, out usbEndpointInfo);
+
+            ushort address = 0x11;
+            //ushort address = 0x00;
+
+            byte lowbyte = (byte)(address & 0xFF);
+            byte highbyte = (byte)(address >> 8);
+
+            byte[] data = new byte[1];
+
+            //data[0] = _devSettingsBytes[17];
+            data[0] = 67;
+
+            //byte[] cmd = new byte[] { 0xA0, highbyte, lowbyte, 0x20, 0xA0, data[0], 0x00, 0x20 };
+            byte[] cmd = new byte[] { WriteCommandWord, highbyte, lowbyte, 0x20, WriteCommandWord, data[0], 0x00, 0x20 };
+            //byte[] cmd = new byte[] { 0xA0, highbyte, lowbyte, 0x20, 0xA0, 0x00, 0x00, 0x20 };
+
+            //                                   request type                         request    value    index     data attached to request      size,    timeout
+            //int ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE,      9   ,   0x200,     0  ,         tbuf,                   8      , 1000);
+
+            UsbSetupPacket usbPacket = new UsbSetupPacket(
+                (byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface, 
+                (byte)UsbStandardRequest.SetConfiguration, 
+                0x200, 
+                usbInterfaceInfo.Descriptor.InterfaceID, 
+                8);
+
+            bool ret = _usbDev.ControlTransfer(ref usbPacket, cmd, cmd.Length, out lengthTransferred);
+
+            //open write endpoint 0x81.
+            using (_writer = _usbDev.OpenEndpointWriter(WriteEndpointID.Ep01, EndpointType.Interrupt))
+            {
+                //Tuple<ErrorCode, int> res = WriteToAddr(ref _writer, address, _devSettingsBytes);
+                //Tuple<ErrorCode, int> res = WriteToAddr(ref _writer, address, data);
+                ec = _writer.Write(data, 1000, out lengthTransferred);
+                if (ec != ErrorCode.None) Console.WriteLine("Could not write data\n");
+            }
+
+            cmd = new byte[] { 0xA1, highbyte, lowbyte, 0x20, 0xA1, 0x00, 0x00, 0x20 };
+
+            bool retRead = _usbDev.ControlTransfer(ref usbPacket, cmd, cmd.Length, out lengthTransferred);
+
+            //using (_reader = _usbDev.OpenEndpointReader(ReadEndpointID.Ep01, 8))
+            //{
+            //    int numBytes = 0;
+            //    byte[] readBuffer = new byte[8];
+            //    ErrorCode ec = _reader.Read(readBuffer, address, 0x08, 500, out numBytes);
+            //    //read_weather_address(h, history_pos, buf)
+            //    //Tuple<ErrorCode, int> res = ReadFromAddr(ref _reader, usbInterfaceInfo, history_pos, ref buf);
+
+            //    //Tuple<ErrorCode, int> res = WriteToAddr(ref _writer, 0x0, _devSettingsBytes);
+            //}
+
         }
         #endregion
 
 
 
-        #region Read and Write functions - high and low level
+        #region Write functions - high and low level
 
-        //
-        //Reads weather ack message when writing setting data.    
-        //
-        int Read_weather_ack(ref UsbDevice devh, int addr)
-        {
-            int i;
-            byte[] buf = new byte[8];
-
-            Read_weather_msg(ref devh, buf, addr);
-
-            // The ack should consist of just 0xa5.
-            for (i = 0; i < 8; i++)
-            {
-                //debug_printf(2, "%x ", (buf[i] & 0xff));
-
-                if ((buf[i] & 0xff) != 0xa5)
-                    return -1;
-            }
-
-            //    debug_printf(2, "\n");
-
-            return 0;
-        }
 
         //
         // Writes 1 byte of data to the weather station.
@@ -602,7 +677,36 @@ namespace FineOffsetLib.HIDmgr
         }
 
 
+        #endregion
 
+
+
+        #region Read Functions
+
+
+        //
+        //Reads weather ack message when writing setting data.    
+        //
+        int Read_weather_ack(ref UsbDevice devh, int addr)
+        {
+            int i;
+            byte[] buf = new byte[8];
+
+            Read_weather_msg(ref devh, buf, addr);
+
+            // The ack should consist of just 0xa5.
+            for (i = 0; i < 8; i++)
+            {
+                //debug_printf(2, "%x ", (buf[i] & 0xff));
+
+                if ((buf[i] & 0xff) != 0xa5)
+                    return -1;
+            }
+
+            //    debug_printf(2, "\n");
+
+            return 0;
+        }
 
 
 
@@ -643,9 +747,20 @@ namespace FineOffsetLib.HIDmgr
             // Look and see if its endpoint matches UsbConstants.ENDPOINT_DIR_MASK
             UsbEndpointBase.LookupEndpointInfo(_usbDev.Configs[0], UsbConstants.ENDPOINT_DIR_MASK, out usbInterfaceInfo, out usbEndpointInfo);
 
-            //                                   request type                       request                             value    index           data attached to request      size,    timeout
-            //int ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE,                                       9   ,   0x200,                0  ,         msg,                   8      , 1000);
-            usbPacket = new UsbSetupPacket((byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface, 9, (short)0x200, usbInterfaceInfo.Descriptor.InterfaceID, Convert.ToInt16(msgsize));
+
+
+            //                                   request type                       request  value  index   data attached to request      size,    timeout
+            //int ret = usb_control_msg(devh, USB_TYPE_CLASS + USB_RECIP_INTERFACE,  9   ,   0x200,   0  ,         msg,                   8      , 1000);
+
+
+            //byte reqType = (byte)UsbCtrlFlags.Direction_Out | (byte)UsbCtrlFlags.RequestType_Class | (byte)UsbCtrlFlags.Recipient_Interface;
+            //byte reqType = (byte)UsbCtrlFlags.Direction_Out + (byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface;
+            byte reqType = (byte)UsbCtrlFlags.RequestType_Class + (byte)UsbCtrlFlags.Recipient_Interface;
+            usbPacket = new UsbSetupPacket(reqType,
+                (byte)UsbStandardRequest.SetConfiguration, 
+                (short)0x200, 
+                usbInterfaceInfo.Descriptor.InterfaceID, 
+                Convert.ToInt16(msgsize));
 
             var ret = _usbDev.ControlTransfer(ref usbPacket, msg, msg.Length, out bytes_written);
 
@@ -656,6 +771,7 @@ namespace FineOffsetLib.HIDmgr
 
 
         #endregion
+
 
 
 
@@ -694,6 +810,8 @@ namespace FineOffsetLib.HIDmgr
                 {
                     //                              endpoint, buffer , size, timeout
                     //ret = usb_interrupt_read(devh, 0x81,      buf,   0x20, 1000);
+
+                    //                                  32 bytes, timeout
                     ec = reader.Read(readBuffer, address, 0x20, 500, out numBytes);
 
                     if (ec == ErrorCode.Win32Error)
@@ -712,7 +830,23 @@ namespace FineOffsetLib.HIDmgr
         }
 
 
+        private Tuple<ErrorCode, int> WriteToAddr(ref UsbEndpointWriter writer, ushort address, byte[] writeData)
+        {
+            int result = 0;
+            ErrorCode ec = ErrorCode.None;
+            int transferLength = 0;
 
+            try {
+                ec = writer.Write(writeData, 1000, out transferLength);
+            }
+            catch(ArgumentOutOfRangeException bufEx)
+            {
+                Console.WriteLine();
+                Console.WriteLine((ec != ErrorCode.None ? ec + ":" : String.Empty) + bufEx.Message);
+            }
+
+            return new Tuple<ErrorCode, int>(ec, result); ;
+        }
 
 
 
@@ -754,7 +888,7 @@ namespace FineOffsetLib.HIDmgr
         public void Print_history_item(FOweatheritem item)
         {
             FOweatherdata wd = item.WeatherData;
-            int i;
+            //int i;
 
             //                  1      2    3     4      5     6    7    8    9   10	11	  12    13    14    15    16    17    18    19    20    21    22   23     24   25    26    27    28    29    30    31    32    33  34  35
             //Console.WriteLine("{0:d}, {1}, {2}, {3:d}, {4:d}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}, {13}, {16}, {17}, {18}, {19}, {20}, {21}, {22}, {23}, {24}, {25}, {26}, {27}, {28}, {29}, {30}, {31}, {32}, {32}, {34}, {34}, {34}, ",
@@ -837,14 +971,10 @@ namespace FineOffsetLib.HIDmgr
 
         public void Print_status(FOsettings ws)
         {
-            Console.WriteLine("Station settings:");
-            Console.WriteLine("  Magic number:\t\t\t0x{0}{1}", ws.magic_number[0], ws.magic_number[1] & 0xff);
-            Console.WriteLine("  Read period:\t\t\t{0} minutes", ws.read_period);
-            Console.WriteLine("  Timezone:\t\t\tCET{0}{1}", (ws.timezone > 0) ? "+" : "-", ws.timezone);
-            Console.WriteLine("  Data count:\t\t\t{0} out of {1} ({2}%)", ws.data_count, HISTORY_MAX, (float)ws.data_count / HISTORY_MAX * 100);
+            Console.WriteLine("Current readings:");
             Console.WriteLine("  Current memory position:\t{0} (0x{1})", ws.current_pos, ws.current_pos);
             //Console.WriteLine("  Current Relative pressure:\t{0} hPa", calculate_relative_pressure(ws.relative_pressure));
-            Console.WriteLine("  Current Absolute pressure:\t{0} {1}", ws.absolute_pressure * 0.1f, ws.pressure_unit);
+            Console.WriteLine("  Current Absolute pressure:\t{0} hPa", ws.absolute_pressure * 0.1f);
             Console.Write("  Unknown bytes:\t\t0x");
             {
                 int i;
@@ -858,6 +988,11 @@ namespace FineOffsetLib.HIDmgr
         public void Print_settings(FOsettings ws)
         {
             Console.WriteLine("Unit settings:");
+            //Console.WriteLine("Station settings:");
+            Console.WriteLine("  Magic number:\t\t\t0x{0}{1}", ws.magic_number[0], ws.magic_number[1] & 0xff);
+            Console.WriteLine("  Read period:\t\t\t{0} minutes", ws.read_period);
+            Console.WriteLine("  Timezone:\t\t\tCET{0}{1}", (ws.timezone > 0) ? "+" : "-", ws.timezone);
+            Console.WriteLine("  Data count:\t\t\t{0} out of {1} ({2}%)", ws.data_count, HISTORY_MAX, (float)ws.data_count / HISTORY_MAX * 100);
             Console.WriteLine("  Indoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 0))) ? "Fahrenheit" : "Celcius");
             Console.WriteLine("  Outdoor temperature unit:\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 1))) ? "Fahrenheit" : "Celcius");
             Console.WriteLine("  Rain unit:\t\t\t{0}", (Convert.ToBoolean(ws.unit_settings1 & (1 << 2))) ? "mm" : "inch");
@@ -890,15 +1025,6 @@ namespace FineOffsetLib.HIDmgr
             Console.WriteLine("  Time:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 2)) ? "12 hour" : "24 hour");
             Console.WriteLine("  Date:\t\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 3)) ? "Month-day-year" : "Day-month-year");
             Console.WriteLine("  Time scale:\t\t\t{0}", Convert.ToBoolean(ws.display_options1 & (1 << 4)) ? "24 hour" : "12 hour");
-
-            Console.Write("  Date:\t\t\t\t");
-            if (Convert.ToBoolean(ws.display_options1 & (1 << 5)))
-                Console.Write("Show year");
-            else if (Convert.ToBoolean(ws.display_options1 & (1 << 6)))
-                Console.Write("Show day name");
-            else if (Convert.ToBoolean(ws.display_options1 & (1 << 7)))
-                Console.Write("Alarm time");
-            Console.WriteLine("");
 
             Console.Write("  Outdoor temperature:\t\t");
             if (Convert.ToBoolean(ws.display_options2 & (1 << 0)))

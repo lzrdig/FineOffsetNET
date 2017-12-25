@@ -51,7 +51,7 @@ namespace FineOffset.WeatherStation
                         Debug.WriteLine("Start reading history blocks\n");
                         myDevMGr.GetWeatherData(items_to_read);
 
-                        myDevMGr.Print_summary(ws, myDevMGr.History[HISTORY_MAX - items_to_read]);
+                        myDevMGr.Print_summary(ws, myDevMGr.History[HISTORY_MAX - 1]);
 
                         Debug.WriteLine("Index\tTimestamp\t\tDelay\n");
                         Console.WriteLine("Index\tTimestamp\t\tDelay\n");
@@ -61,6 +61,9 @@ namespace FineOffset.WeatherStation
                         myDevMGr.Print_status(ws);
 
                         myDevMGr.Print_settings(ws);
+
+                        //myDevMGr.SetIndoorTmrptUnits();
+                        myDevMGr.SetTmrptLowLevel();
                     }
                 }
                 
